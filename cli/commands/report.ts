@@ -499,7 +499,7 @@ export function registerReportCommand(program: Command): void {
       // Open in browser
       if (opts.open !== false) {
         try {
-          const { default: open } = await import('open').catch(async () => {
+          const { default: open } = await import('open').catch(() => {
             // open package may not be installed — fall back to platform commands
             return { default: null };
           });

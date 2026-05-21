@@ -26,7 +26,7 @@ export const ruleTester = new RuleTester({
  */
 let tsRuleTesterInstance: RuleTester;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const tsParser = require('@typescript-eslint/parser') as object;
   tsRuleTesterInstance = new RuleTester({
     languageOptions: {
