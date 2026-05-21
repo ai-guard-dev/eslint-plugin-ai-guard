@@ -42,5 +42,5 @@ export default function App() {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15000);
 });
