@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
-import { noCatchLogRethrow } from '../../src/rules/error-handling/no-catch-log-rethrow';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
+import { ruleTester } from '../helpers/rule-tester';
+import { noCatchLogRethrow } from '../../src/rules/reliability/no-catch-log-rethrow';
 
 ruleTester.run('no-catch-log-rethrow', noCatchLogRethrow, {
   valid: [

@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
+import { ruleTester } from '../helpers/rule-tester';
 import { noFloatingPromise } from '../../src/rules/async/no-floating-promise';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
 
 ruleTester.run('no-floating-promise', noFloatingPromise, {
   valid: [

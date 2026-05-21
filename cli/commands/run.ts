@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import ora from 'ora';
 import chalk from 'chalk';
 import { runEslint, type Preset } from '../utils/eslint-runner.js';
-import { log } from '../utils/logger.js';
+import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER } from '../utils/logger.js';
 import type { RunResult } from '../utils/eslint-runner.js';
 
 export function registerRunCommand(program: Command): void {
@@ -12,10 +12,10 @@ export function registerRunCommand(program: Command): void {
     .option('--path <dir>', 'Directory or file to scan', '.')
     .option('--strict', 'Use the strict rule preset (all rules at error)')
     .option('--security', 'Use the security-only rule preset')
-    .option('--json', 'Output results as JSON')
+    .option('--json', 'Output results as JSON (CI-friendly)')
     .option(
       '--max-warnings <n>',
-      'Fail if warnings exceed this count',
+      'Fail with exit code 1 if warnings exceed this count',
       (value: string) => Number.parseInt(value, 10),
     )
     .action(async (opts: {
@@ -48,7 +48,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       if (!opts.json) {
-        log.banner('AI GUARD RESULTS');
+        log.banner('AI GUARD');
         log.blank();
       }
 
@@ -64,7 +64,6 @@ export function registerRunCommand(program: Command): void {
         spinner?.stop();
         const msg = err instanceof Error ? err.message : String(err);
 
-        // Friendly TS parser error
         if (msg.toLowerCase().includes('typescript') && msg.toLowerCase().includes('parser')) {
           log.blank();
           log.error('TypeScript detected but parser not found.');
@@ -90,6 +89,7 @@ export function registerRunCommand(program: Command): void {
         const jsonOutput = {
           preset,
           scannedPath: opts.path,
+          filesScanned: result.filesScanned,
           totalErrors: result.totalErrors,
           totalWarnings: result.totalWarnings,
           totalIssues: result.totalIssues,
@@ -103,28 +103,74 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
-      // ─── Human output ──────────────────────────────────────────────────────
+      // ─── Human output ───────────────────────────────────────────────────────
 
-      // Header: scan info
-      log.success(`Scanned:  ${chalk.white(opts.path)}`);
-      log.success(`Duration: ${chalk.white(result.durationMs + 'ms')}`);
+      // Scan stats header
+      log.scanStats(result.filesScanned, result.files.length, result.durationMs, preset);
       log.blank();
 
       // ── Success state ────────────────────────────────────────────────────────
 
       if (result.totalIssues === 0) {
         log.print(
-          `  ${chalk.green('✔')}  ${chalk.bold.green('No AI issues found — your code looks clean')}`,
+          `  ${chalk.green('✔')}  ${chalk.bold.green('No AI issues found')}  ${chalk.gray(`— ${result.filesScanned} file${result.filesScanned !== 1 ? 's' : ''} scanned, all clean`)}`,
         );
         log.blank();
         process.exit(0);
         return;
       }
 
-      // ── Issue summary ────────────────────────────────────────────────────────
+      // ── Category summary with icons ─────────────────────────────────────────
+
+      log.section('Summary by Category');
+
+      // Build per-category error/warning counts
+      const categoryErrors: Record<string, number> = {};
+      const categoryWarnings: Record<string, number> = {};
+
+      for (const file of result.files) {
+        for (const issue of file.issues) {
+          const cat = RULE_CATEGORY[issue.ruleId] ?? 'Other';
+          if (issue.severity === 2) {
+            categoryErrors[cat] = (categoryErrors[cat] ?? 0) + 1;
+          } else {
+            categoryWarnings[cat] = (categoryWarnings[cat] ?? 0) + 1;
+          }
+        }
+      }
+
+      // Print in priority order (Security first, then Reliability, etc.)
+      const allCategories = new Set([
+        ...CATEGORY_ORDER,
+        ...Object.keys(categoryErrors),
+        ...Object.keys(categoryWarnings),
+      ]);
+
+      const sortedCategories = [...allCategories].filter(
+        (cat) => (categoryErrors[cat] ?? 0) + (categoryWarnings[cat] ?? 0) > 0,
+      );
+
+      // Sort by CATEGORY_ORDER, then alphabetical for unknowns
+      sortedCategories.sort((a, b) => {
+        const ai = CATEGORY_ORDER.indexOf(a);
+        const bi = CATEGORY_ORDER.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.localeCompare(b);
+      });
+
+      for (const cat of sortedCategories) {
+        const icon = CATEGORY_ICONS[cat] ?? '⚪';
+        log.category(icon, cat, categoryErrors[cat] ?? 0, categoryWarnings[cat] ?? 0);
+      }
+
+      log.blank();
+
+      // ── Total issues line ────────────────────────────────────────────────────
 
       log.print(
-        `  ${chalk.bold('Total Issues:')} ${formatIssueCount(result.totalErrors, result.totalWarnings)}`,
+        `  ${chalk.bold('Total:')} ${formatIssueCount(result.totalErrors, result.totalWarnings)}`,
       );
       log.blank();
 
@@ -137,7 +183,6 @@ export function registerRunCommand(program: Command): void {
           (a, b) => b[1] - a[1],
         );
         for (const [rule, count] of sorted) {
-          // Strip the "ai-guard/" prefix for cleaner display
           const shortRule = rule.replace(/^ai-guard\//, '');
           log.print(
             `    ${chalk.gray('•')} ${chalk.yellow(shortRule)}${chalk.gray(':')} ${chalk.white(String(count))}`,
@@ -193,11 +238,9 @@ export function registerRunCommand(program: Command): void {
       // ── Next steps ───────────────────────────────────────────────────────────
 
       log.section('Next Steps');
-      if (!result.topFiles.length) {
-        log.info(`Run ${chalk.cyan('ai-guard init')}     to wire up ESLint for your editor`);
-      }
       log.info(`Run ${chalk.cyan('ai-guard baseline')} to save these issues and track only new ones`);
-      log.info(`Run ${chalk.cyan('ai-guard ignore')}    to suppress dist/build noise`);
+      log.info(`Run ${chalk.cyan('ai-guard report')}   to generate a shareable HTML report`);
+      log.info(`Run ${chalk.cyan('ai-guard ignore')}   to suppress dist/build noise`);
       log.blank();
 
       process.exit(getRunExitCode(result, opts.maxWarnings));

@@ -1,18 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
-import { noBroadException } from '../../src/rules/error-handling/no-broad-exception';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-    parser: require('@typescript-eslint/parser'),
-  },
-});
+import { ruleTester } from '../helpers/rule-tester';
+import { noBroadException } from '../../src/rules/reliability/no-broad-exception';
 
 ruleTester.run('no-broad-exception', noBroadException, {
   valid: [

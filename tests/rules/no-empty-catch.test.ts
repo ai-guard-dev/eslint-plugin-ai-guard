@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
-import { noEmptyCatch } from '../../src/rules/error-handling/no-empty-catch';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
+import { ruleTester } from '../helpers/rule-tester';
+import { noEmptyCatch } from '../../src/rules/reliability/no-empty-catch';
 
 ruleTester.run('no-empty-catch', noEmptyCatch, {
   valid: [

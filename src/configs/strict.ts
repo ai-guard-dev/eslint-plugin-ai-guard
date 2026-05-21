@@ -24,9 +24,10 @@ const strict: TSESLint.ClassicConfig.Config = {
     'ai-guard/no-unsafe-deserialize': 'error',
     'ai-guard/require-auth-middleware': 'error',
     'ai-guard/require-authz-check': 'error',
-    // Quality - all at error
+    // AI Patterns - all at error
     'ai-guard/no-console-in-handler': 'error',
     'ai-guard/no-duplicate-logic-block': 'error',
+    'ai-guard/no-dead-branch': 'error',
   },
 };
 

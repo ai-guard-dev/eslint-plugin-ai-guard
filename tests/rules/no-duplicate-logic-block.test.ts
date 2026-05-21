@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
-import { noDuplicateLogicBlock } from '../../src/rules/logic/no-duplicate-logic-block';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
+import { ruleTester } from '../helpers/rule-tester';
+import { noDuplicateLogicBlock } from '../../src/rules/ai-patterns/no-duplicate-logic-block';
 
 ruleTester.run('no-duplicate-logic-block', noDuplicateLogicBlock, {
   valid: [

@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
+import { ruleTester } from '../helpers/rule-tester';
 import { requireAuthzCheck } from '../../src/rules/security/require-authz-check';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
 
 ruleTester.run('require-authz-check', requireAuthzCheck, {
   valid: [

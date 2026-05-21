@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
+import { ruleTester } from '../helpers/rule-tester';
 import { noAwaitInLoop } from '../../src/rules/async/no-await-in-loop';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
 
 ruleTester.run('no-await-in-loop', noAwaitInLoop, {
   valid: [
@@ -115,6 +103,46 @@ ruleTester.run('no-await-in-loop', noAwaitInLoop, {
             };
 
             runInNestedScope();
+          }
+        }
+      `,
+    },
+    // 10. while loop with retry counter — should NOT flag (retry pattern)
+    {
+      code: `
+        async function withRetry(url, maxRetries = 3) {
+          let attempts = 0;
+          while (attempts < maxRetries) {
+            try {
+              return await fetch(url);
+            } catch (e) {
+              attempts++;
+            }
+          }
+        }
+      `,
+    },
+    // 11. Await inside loop but in a nested async function
+    {
+      code: `
+        async function processAll(items) {
+          for (const item of items) {
+            setTimeout(async () => {
+              await processItem(item);
+            }, 0);
+          }
+        }
+      `,
+    },
+    // 12. while loop with sequential counter mutation (i++ modifies outer state)
+    // The rule correctly does NOT fire here because i is a shared counter — sequential dependency
+    {
+      code: `
+        async function pollAll(urls) {
+          let i = 0;
+          while (i < urls.length) {
+            await fetch(urls[i]);
+            i++;
           }
         }
       `,

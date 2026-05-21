@@ -1,0 +1,22 @@
+# Example: Add AI Guard scanning to your GitLab CI pipeline
+# Add this to your .gitlab-ci.yml or include as a separate template
+
+stages:
+  - quality
+
+ai-guard-scan:
+  stage: quality
+  image: node:20-alpine
+  script:
+    - npm ci
+    - npx ai-guard run --path src
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      # Optional: save JSON report as CI artifact
+      # Run with: npx ai-guard run --json > ai-guard-results.json
+      # junit: ai-guard-results.json

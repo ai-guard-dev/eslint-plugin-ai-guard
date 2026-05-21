@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
+import { ruleTester } from '../helpers/rule-tester';
 import { noHardcodedSecret } from '../../src/rules/security/no-hardcoded-secret';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
 
 ruleTester.run('no-hardcoded-secret', noHardcodedSecret, {
   valid: [
@@ -70,6 +58,24 @@ ruleTester.run('no-hardcoded-secret', noHardcodedSecret, {
           },
         };
       `,
+    },
+    // 12. Test file path — real sk- prefixed token should be flagged (even sk-test- ones)
+    // This moved to invalid because sk-test-* tokens can be real API keys
+    // 12. Constant with env var default (different from literal)
+    {
+      code: `const TEST_API_KEY = process.env.TEST_API_KEY ?? 'fallback';`,
+    },
+    // 13. Function parameter default with env pattern
+    {
+      code: `function init(apiKey = process.env.API_KEY) { return apiKey; }`,
+    },
+    // 14. Object destructuring from process.env
+    {
+      code: `const { API_KEY: apiKey } = process.env;`,
+    },
+    // 15. Secret used as type annotation (TS interface)
+    {
+      code: `const PLACEHOLDER = 'INSERT_API_KEY_HERE';`,
     },
   ],
   invalid: [
@@ -144,6 +150,27 @@ ruleTester.run('no-hardcoded-secret', noHardcodedSecret, {
       code: `const accessToken = 'ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';`,
       output: `const accessToken = process.env.ACCESS_TOKEN;`,
       errors: [{ messageId: 'hardcodedSecret' }],
+    },
+    // 11. camelCase secret name with long value
+    {
+      code: `const signingKey = 'rsa-private-key-begins-here-1234567890';`,
+      output: `const signingKey = process.env.SIGNING_KEY;`,
+      errors: [{ messageId: 'hardcodedSecret' }],
+    },
+    // 12. Multiple secret assignments in one block — each flagged
+    {
+      code: `
+    const apiKey = 'sk-prod-abcdef1234567890abcdef12345678';
+    const clientSecret = 'super-secret-client-value-12345';
+  `,
+      output: `
+    const apiKey = process.env.API_KEY;
+    const clientSecret = process.env.CLIENT_SECRET;
+  `,
+      errors: [
+        { messageId: 'hardcodedSecret' },
+        { messageId: 'hardcodedSecret' },
+      ],
     },
   ],
 });

@@ -1,19 +1,39 @@
 <p align="center">
+  <img src="./assets/logo.png" alt="AI Guard Logo" width="80" />
   <h1 align="center">eslint-plugin-ai-guard</h1>
   <p align="center">
-    <strong>🛡️ ESLint plugin that catches the code patterns AI tools get wrong most often.</strong>
+    <strong>🛡️ The ESLint plugin built for the age of AI-generated code.</strong>
   </p>
   <p align="center">
-    <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><img src="https://img.shields.io/npm/v/eslint-plugin-ai-guard.svg?style=flat-square" alt="npm version"></a>
-    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/actions"><img src="https://img.shields.io/github/actions/workflow/status/YashJadhav21/eslint-plugin-ai-guard/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-    <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><img src="https://img.shields.io/npm/dm/eslint-plugin-ai-guard.svg?style=flat-square" alt="downloads"></a>
-    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/eslint-plugin-ai-guard.svg?style=flat-square" alt="license"></a>
+    <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><img src="https://img.shields.io/npm/v/eslint-plugin-ai-guard.svg?style=flat-square&color=7c3aed" alt="npm version"></a>
+    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/actions"><img src="https://img.shields.io/github/actions/workflow/status/YashJadhav21/eslint-plugin-ai-guard/ci.yml?style=flat-square&label=CI&color=10b981" alt="CI"></a>
+    <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><img src="https://img.shields.io/npm/dm/eslint-plugin-ai-guard.svg?style=flat-square&color=3b82f6" alt="downloads"></a>
+    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/eslint-plugin-ai-guard.svg?style=flat-square&color=64748b" alt="license"></a>
   </p>
 </p>
 
 ---
 
-AI-generated code has **1.7× more issues** and **2.74× more security vulnerabilities** than human code ([CodeRabbit 2025](https://www.coderabbit.ai/)). Existing linters catch human mistakes — `ai-guard` catches the patterns AI tools consistently get wrong: empty catch blocks, floating promises, async array misuse, and more.
+## The Problem
+
+AI coding assistants generate code that **looks correct but isn't.** Research shows AI-generated code has **1.7× more bugs** and **2.74× more security vulnerabilities** than human-written code.
+
+The patterns they get wrong are consistent and predictable:
+
+| Pattern | Why AI Gets It Wrong |
+|---------|---------------------|
+| `try {} catch (e) {}` | AI adds catch blocks without thinking about error handling |
+| `array.map(async ...)` | AI generates async callbacks that return `Promise[]`, not values |
+| `fetch(url)` (no await) | AI forgets to await or handle promise rejection |
+| `const apiKey = 'sk-...'` | AI uses placeholder credentials that get committed |
+| `eval(userInput)` | AI generates dynamic evaluation without security awareness |
+| `if (true) { ... }` | AI leaves dead scaffolding branches in generated code |
+
+**Existing linters don't catch these** because they're designed for human coding patterns.
+
+`ai-guard` is purpose-built to catch what AI tools consistently get wrong.
+
+---
 
 ## Install
 
@@ -21,32 +41,195 @@ AI-generated code has **1.7× more issues** and **2.74× more security vulnerabi
 npm install --save-dev eslint-plugin-ai-guard
 ```
 
-## 🚀 Quick Start – CLI (no config needed)
+Requires: **Node.js ≥ 18**, **ESLint ≥ 8**
+
+---
+
+## Quick Start — Zero Config Required
 
 ```bash
-npx ai-guard run          # recommended preset (lowest noise)
-npx ai-guard run --strict
+# Scan your project immediately (no ESLint config needed)
+npx ai-guard run
+
+# Security-focused scan
 npx ai-guard run --security
-npx ai-guard init         # auto-creates ESLint config for you
-npx ai-guard init --dry-run
-npx ai-guard doctor       # diagnoses setup issues
-npx ai-guard baseline     # track only *new* issues going forward
+
+# Strict mode — all rules at error
+npx ai-guard run --strict
+
+# Scan a specific directory
+npx ai-guard run --path src/api
 ```
-That's it. **Zero configuration required.**
 
-## 🤖 Set Up AI Agent Rules
+**That's it.** No configuration, no setup.
 
-Generate instruction files so Claude Code, Cursor, and GitHub Copilot
-automatically avoid the 17 most common AI-generated anti-patterns:
+---
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `ai-guard run` | Scan your project with the recommended preset |
+| `ai-guard run --strict` | All rules at error — for CI enforcement |
+| `ai-guard run --security` | Security rules only |
+| `ai-guard run --json` | Output results as JSON (CI-friendly) |
+| `ai-guard run --max-warnings 0` | Fail CI on any warning |
+| `ai-guard init` | Auto-configure ESLint for your project |
+| `ai-guard init-context` | Generate AI agent rules (CLAUDE.md, .cursorrules, etc.) |
+| `ai-guard doctor` | Diagnose your ESLint setup |
+| `ai-guard baseline` | Save current issues, track only new ones |
+| `ai-guard report` | Generate a shareable HTML report |
+| `ai-guard ignore` | Add patterns to suppress noise |
+
+### Terminal Output
+
+```
+  AI GUARD
+
+  Files scanned:  142  ·  Issues in:  7 files  ·  Duration:  312ms  ·  Preset:  recommended
+
+  ── Summary by Category ──
+
+  🔴  Security            3 errors
+  🟠  Reliability         2 errors
+  🟡  Async Stability     2 warnings
+
+  Total: 5 errors · 2 warnings
+
+  ── By Rule ──
+    • no-hardcoded-secret: 3
+    • no-empty-catch: 2
+    • no-floating-promise: 2
+
+  ── Next Steps ──
+  ℹ  Run ai-guard baseline to save these issues and track only new ones
+  ℹ  Run ai-guard report   to generate a shareable HTML report
+```
+
+---
+
+## Rules
+
+### 🔴 Security
+
+| Rule | Default | What it catches |
+|------|---------|-----------------|
+| `no-hardcoded-secret` | **error** | API keys, passwords, tokens in source code. Autofix: replaces with `process.env.*` |
+| `no-eval-dynamic` | **error** | `eval()` / `new Function()` with non-literal arguments |
+| `no-sql-string-concat` | warn | SQL queries built by string concatenation or interpolation |
+| `no-unsafe-deserialize` | warn | `JSON.parse(req.body)` without validation |
+| `require-auth-middleware` | warn | Express/Fastify routes without authentication middleware |
+| `require-authz-check` | warn | Resource access without ownership checks |
+
+### 🟠 Reliability
+
+| Rule | Default | What it catches |
+|------|---------|-----------------|
+| `no-empty-catch` | **error** | `catch (e) {}` — errors vanish silently. Autofix: inserts `/* TODO: handle error */` |
+| `no-broad-exception` | warn | `catch (e: any)` that hides the real error type |
+| `no-catch-log-rethrow` | off* | Catch blocks that only `console.log` + rethrow |
+| `no-catch-without-use` | off* | Catching an error and never using it |
+
+*Enabled at `error` in `strict` preset.
+
+### 🟡 Async Stability
+
+| Rule | Default | What it catches |
+|------|---------|-----------------|
+| `no-floating-promise` | **error** | Async calls with no `await`, return, or `.catch()`. Autofix: adds `void` |
+| `no-async-array-callback` | warn | `array.map(async ...)` returning `Promise[]` instead of values |
+| `no-await-in-loop` | warn | Sequential `await` in loops (use `Promise.all`). Autofix available for simple cases |
+| `no-async-without-await` | warn | `async` function that never uses `await` |
+| `no-redundant-await` | off* | `return await` outside try/catch |
+
+*Enabled at `error` in `strict` preset.
+
+### 🔵 AI Patterns
+
+| Rule | Default | What it catches |
+|------|---------|-----------------|
+| `no-dead-branch` | warn | `if (true)`, `if (false)`, `x && !x`, `x === x` — scaffolding leftovers |
+| `no-duplicate-logic-block` | off* | Consecutive duplicate code that should be extracted |
+| `no-console-in-handler` | off* | `console.log` in route handlers (use a proper logger) |
+
+*Enabled at `error` in `strict` preset.
+
+---
+
+## Presets
+
+| Preset | Purpose | Recommended For |
+|--------|---------|-----------------|
+| `recommended` | Low-noise, adoption-first — critical issues at `error`, context-sensitive at `warn` | All teams on day one |
+| `strict` | All 18 rules at `error` | CI enforcement in mature codebases |
+| `security` | Security rules only | Security-focused scanning |
+
+### ESLint Config (Flat Config)
+
+```javascript
+// eslint.config.mjs
+import aiGuard from 'eslint-plugin-ai-guard';
+
+export default [
+  {
+    plugins: { 'ai-guard': aiGuard },
+    rules: { ...aiGuard.configs.recommended.rules },
+  },
+];
+```
+
+```javascript
+// Strict preset
+export default [
+  {
+    plugins: { 'ai-guard': aiGuard },
+    rules: { ...aiGuard.configs.strict.rules },
+  },
+];
+```
+
+---
+
+## CI Integration
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/ai-guard.yml
+name: AI Guard
+
+on: [pull_request]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - run: npx ai-guard run --max-warnings 0
+```
+
+See [`examples/ci/`](./examples/ci/) for more templates (GitLab CI, baseline mode, JSON output).
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | No issues (or only warnings below `--max-warnings` threshold) |
+| `1` | Errors found, or warnings exceed `--max-warnings` |
+
+---
+
+## AI Agent Rules
+
+Generate instruction files so **Claude Code, Cursor, and GitHub Copilot** automatically avoid the 18 most common AI-generated anti-patterns:
 
 ```bash
 npx ai-guard init-context
-```
-
-Follow the prompts to select your agent(s). Or generate all at once:
-
-```bash
-npx ai-guard init-context --all
 ```
 
 This writes:
@@ -54,154 +237,68 @@ This writes:
 - `.cursorrules` — read automatically by Cursor
 - `.github/copilot-instructions.md` — read automatically by GitHub Copilot
 
-Your AI tools will now avoid these patterns before you even run the linter.
-Use `--force` to regenerate after upgrading to a new version with new rules.
+Your AI tools will now avoid these patterns **before** you even run the linter.
 
-## 🧪 Real-World Usage Philosophy
+---
 
-`ai-guard` is designed for production adoption in existing codebases:
-
-1. **Recommended preset is intentionally low-noise** to avoid overwhelming teams on day one.
-2. **Strict preset enables full enforcement** for mature teams that want maximum coverage.
-3. **Security preset focuses only on security rules** with critical issues as errors.
-
-## 🛠️ Safe Autofix Support
-
-`ai-guard` now includes safe autofixers for selected high-confidence rules:
-
-- `ai-guard/no-empty-catch` → inserts `{ /* TODO: handle error */ }`
-- `ai-guard/no-await-in-loop` → rewrites simple independent loops to `await Promise.all(...)`
-- `ai-guard/no-hardcoded-secret` → replaces hardcoded literals with `process.env.*`
-- `ai-guard/no-floating-promise` → marks intentional fire-and-forget with `void`
-- `ai-guard/no-async-without-await` → inserts `await (...)` for simple function bodies
-
-These fixes are intentionally conservative and avoid complex transformations when confidence is low.
-
-## 🎬 Real Workspace Demo
-
-See how `ai-guard` catches a common AI-generated async bug that silent failures in production:
+## Real-World Example
 
 ```typescript
-// ❌ BAD: AI often forgets to await or wrap in Promise.all
-const userIds = [1, 2, 3];
-userIds.map(async (id) => {
-  return await fetchUser(id);
-}); 
-// ⚠️ ai-guard flags: Async callback passed to Array.map(). Returns Promise[], not values.
-
-// ✅ GOOD: ai-guard recommended fix
-const users = await Promise.all(userIds.map(async (id) => {
-  return await fetchUser(id);
-}));
-// ✨ ai-guard: No issues found.
-```
-
-### Terminal Output
-
-![ai-guard linting demo](./assets/example_1.png)
-![ai-guard linting demo](./assets/example_2.png)
-
-*The terminal output above shows `ai-guard` catching multiple AI-generated anti-patterns in a single run.*
-
-## Rules (Recommended Preset)
-
-### 🎯 Error Handling
-
-- **`ai-guard/no-empty-catch`** (Error)
-  Disallow empty catch blocks. Includes safe autofix that inserts an explicit placeholder handler comment.
-- **`ai-guard/no-broad-exception`** (Warn)
-  Disallow catching `any` or `unknown` without instance narrowing. AI tools default to `catch (e: any)` which obscures the underlying failure.
-- **`ai-guard/no-catch-log-rethrow`** (Off in `recommended`, Error in `strict`)
-  Disallow catch blocks that only log and rethrow the same error. AI tools often generate this noisy pattern without adding recovery or context.
-- **`ai-guard/no-catch-without-use`** (Off in `recommended`, Error in `strict`)
-  Disallow unused catch parameters. AI tools frequently add `catch (e)` while ignoring the error object entirely.
-- **`ai-guard/no-duplicate-logic-block`** (Off in `recommended`, Error in `strict`)
-  Disallow consecutive duplicated logic blocks. AI tools often copy-paste identical code that should be consolidated.
-
-### ⏱️ Async Stability
-
-- **`ai-guard/no-async-array-callback`** (Warn)
-  Disallow async functions in `.map()`, `.filter()`, etc. AI tools frequently suggest `array.map(async ...)` expecting resolved values, creating silent bugs.
-- **`ai-guard/no-floating-promise`** (Error)
-  Require awaiting or handling promises. Includes safe autofix that marks floating calls with `void`.
-- **`ai-guard/no-await-in-loop`** (Warn)
-  Disallow independent sequential `await` inside loops. Intent-aware suppression protects retry/fallback loops, and safe autofix is available for simple independent cases.
-- **`ai-guard/no-async-without-await`** (Warn)
-  Disallow async functions that do not use `await`. Includes safe autofix for simple bodies by inserting explicit await.
-- **`ai-guard/no-redundant-await`** (Off in `recommended`, Error in `strict`)
-  Disallow redundant `return await` outside try/catch/finally. AI tools often emit this pattern even when returning the Promise directly is equivalent.
-
-### 🛡️ Security
-
-- **`ai-guard/no-hardcoded-secret`** (Error)
-  Disallow hardcoded keys/passwords. Includes safe autofix that rewrites values to `process.env.*`.
-- **`ai-guard/no-eval-dynamic`** (Error)
-  Disallow dynamic `eval()` or `new Function()`.
-- **`ai-guard/no-sql-string-concat`** (Warn in `recommended`, Error in `security`/`strict`)
-  Disallow variable concatenation/interpolation in SQL queries. Now context-aware for known query builders (Knex, Drizzle, Prisma, Kysely, Sequelize, TypeORM, Mikro-ORM) to reduce false positives while staying strict for non-builder sinks.
-- **`ai-guard/no-unsafe-deserialize`** (Warn in `recommended`/`security`, Error in `strict`)
-  Disallow `JSON.parse()` on likely untrusted inputs (like `req.body`) without visible validation.
-- **`ai-guard/require-auth-middleware`** (Warn)
-  Enforce authentication middleware on Express/Fastify routes. AI tools frequently generate unprotected endpoints exposing sensitive data.
-- **`ai-guard/require-authz-check`** (Warn in `recommended`/`security`, Error in `strict`)
-  Require visible ownership/authorization checks when handlers access resource identifiers (like `req.params.id`).
-
-### 🧹 Code Quality
-
-- **`ai-guard/no-console-in-handler`** (Off in `recommended`, Error in `strict`)
-  Disallow `console.*` inside HTTP route handlers. AI tools often leave debug logs in handlers that leak internals and pollute production logs.
-
-### Configs
-
-| Config | Description |
-| --- | --- |
-| `recommended` | Adoption-first preset: high-confidence issues as `error`, context-sensitive rules as `warn`/`off` |
-| `strict` | All rules at `error` — for teams that want maximum coverage |
-| `security` | Security-only rules: critical issues at `error`, contextual checks at `warn` |
-
-### Config Examples
-
-#### Flat Config: strict
-
-```javascript
-import aiGuard from "eslint-plugin-ai-guard";
-
-export default [
-  {
-    plugins: { "ai-guard": aiGuard },
-    rules: { ...aiGuard.configs.strict.rules }
+// ❌ Common AI-generated code — 4 issues in one function
+async function processUserOrders(userId: string) {
+  const apiKey = 'sk-prod-1234567890abcdef';  // no-hardcoded-secret
+  
+  const orders = await db.query('SELECT * FROM orders WHERE id = ' + userId);  // no-sql-string-concat
+  
+  for (const order of orders) {
+    await sendEmail(order.email);  // no-await-in-loop
   }
-];
+  
+  updateAnalytics(userId);  // no-floating-promise
+}
+
+// ✅ After ai-guard fixes
+async function processUserOrders(userId: string) {
+  const apiKey = process.env.API_KEY;
+
+  const orders = await db.query('SELECT * FROM orders WHERE id = $1', [userId]);
+
+  await Promise.all(orders.map(async (order) => sendEmail(order.email)));
+
+  void updateAnalytics(userId);
+}
 ```
 
-#### Flat Config: security
+---
 
-```javascript
-import aiGuard from "eslint-plugin-ai-guard";
+## Autofix Support
 
-export default [
-  {
-    plugins: { "ai-guard": aiGuard },
-    rules: { ...aiGuard.configs.security.rules }
-  }
-];
+Run autofixes via ESLint:
+
+```bash
+npx eslint src --fix
 ```
 
-## Why This Exists
+Rules with autofix:
 
-AI coding assistants generate code that **looks correct** but has subtle structural issues:
+| Rule | Fix |
+|------|-----|
+| `no-hardcoded-secret` | Replaces literal with `process.env.VAR_NAME` |
+| `no-empty-catch` | Inserts `/* TODO: handle error */` |
+| `no-floating-promise` | Marks with `void` |
+| `no-await-in-loop` | Rewrites simple loops to `Promise.all(...)` |
+| `no-async-without-await` | Removes unnecessary `async` keyword |
 
-- 🕳️ **Empty catch blocks** — errors vanish silently
-- ⏳ **`array.map(async ...)`** — returns `Promise[]`, not resolved values
-- 🔥 **Floating promises** — `fetchData()` without `await` = silent failures
+---
 
-These patterns pass TypeScript and existing linters. `ai-guard` catches them.
+## Philosophy
 
-## Supported Environments
+- **Precision over recall** — we'd rather miss a bug than create noise
+- **Low false positives** — if a warning fires too often on valid code, we disable it in `recommended`
+- **Gradual adoption** — `recommended` is the safe default; `strict` is opt-in
+- **Self-validating** — `ai-guard` scans its own source code in CI
 
-- **ESLint** 8.x and 9.x (flat config)
-- **Node.js** ≥ 18
-- **TypeScript** and JavaScript
+---
 
 ## Development
 
@@ -209,18 +306,25 @@ These patterns pass TypeScript and existing linters. `ai-guard` catches them.
 git clone https://github.com/YashJadhav21/eslint-plugin-ai-guard.git
 cd eslint-plugin-ai-guard
 npm install
-npm run test        # Run test suite
-npm run build       # Build CJS + ESM
-npm run typecheck   # TypeScript check
+npm run test         # Run all 436+ tests
+npm run build        # Build CJS + ESM bundles
+npm run typecheck    # TypeScript check
+npm run lint:self    # Scan own source with ai-guard
 ```
+
+---
 
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-**Rule requests:** Open an issue using the [Rule Request template](https://github.com/YashJadhav21/eslint-plugin-ai-guard/issues/new).
+**Rule requests:** Open an issue — describe the AI anti-pattern and why it's common.
 
-**False positive reports:** Open an issue using the [False Positive template](https://github.com/YashJadhav21/eslint-plugin-ai-guard/issues/new) — we take zero false positives seriously.
+**False positive reports:** We take these seriously. Open an issue with a minimal code example.
+
+See the [Roadmap](ROADMAP.md) for planned features.
+
+---
 
 ## License
 
@@ -229,5 +333,5 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 ---
 
 <p align="center">
-  Built to make AI-assisted development safer. ⚡
+  Built to make AI-assisted development safer and more trustworthy. ⚡
 </p>

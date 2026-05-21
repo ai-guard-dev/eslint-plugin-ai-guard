@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
+import { ruleTester } from '../helpers/rule-tester';
 import { requireAuthMiddleware } from '../../src/rules/security/require-auth-middleware';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
 
 ruleTester.run('require-auth-middleware', requireAuthMiddleware, {
   valid: [
@@ -71,6 +59,18 @@ ruleTester.run('require-auth-middleware', requireAuthMiddleware, {
     {
       code: `app.get('/*', serveFrontend);`,
     },
+    // 13. Fastify-style routes with preHandler auth
+    {
+      code: `fastify.get('/api/users', { preHandler: authenticate }, handler);`,
+    },
+    // 14. POST to /callback — typical OAuth callback, treat as public
+    {
+      code: `router.post('/callback', oauthCallbackHandler);`,
+    },
+    // 15. Route to /api/docs — documentation endpoint, often public
+    {
+      code: `app.get('/api/docs', serveSwagger);`,
+    },
   ],
   invalid: [
     // 1. Basic route with no middleware at all
@@ -110,6 +110,16 @@ ruleTester.run('require-auth-middleware', requireAuthMiddleware, {
     {
       code: `router.get('/data', (req, res) => { const user = authenticate(req); res.send(user); });`,
       errors: [{ messageId: 'missingAuth' }], // 'authenticate' is inside handler, not as middleware
+    },
+    // 8. Route with only body parser middleware (not auth)
+    {
+      code: `router.get('/admin/users', bodyParser.json(), listUsers);`,
+      errors: [{ messageId: 'missingAuth' }],
+    },
+    // 9. PATCH route without auth (common AI-generated mistake)
+    {
+      code: `router.patch('/users/:id', updateUser);`,
+      errors: [{ messageId: 'missingAuth' }],
     },
   ],
 });

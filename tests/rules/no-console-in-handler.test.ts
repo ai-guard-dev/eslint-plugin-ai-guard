@@ -1,17 +1,5 @@
-import { RuleTester } from '@typescript-eslint/rule-tester';
-import { noConsoleInHandler } from '../../src/rules/quality/no-console-in-handler';
-import { describe, it, afterAll } from 'vitest';
-
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-
-const ruleTester = new RuleTester({
-  languageOptions: {
-    ecmaVersion: 2022,
-    sourceType: 'module',
-  },
-});
+import { ruleTester } from '../helpers/rule-tester';
+import { noConsoleInHandler } from '../../src/rules/ai-patterns/no-console-in-handler';
 
 ruleTester.run('no-console-in-handler', noConsoleInHandler, {
   valid: [

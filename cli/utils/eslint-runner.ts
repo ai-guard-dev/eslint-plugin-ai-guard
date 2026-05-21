@@ -36,6 +36,7 @@ export interface RunResult {
   totalErrors: number;
   totalWarnings: number;
   totalIssues: number;
+  filesScanned: number;
   ruleBreakdown: Map<string, number>;
   topFiles: Array<{ path: string; count: number }>;
   durationMs: number;
@@ -70,38 +71,48 @@ function normalizePlugin(raw: unknown): AiGuardPlugin {
 // ─── Preset rule maps ─────────────────────────────────────────────────────────
 
 const RECOMMENDED_RULES: Record<string, RuleLevel> = {
+  // Reliability
   'ai-guard/no-empty-catch': 'error',
-  'ai-guard/no-floating-promise': 'error',
-  'ai-guard/no-hardcoded-secret': 'error',
-  'ai-guard/no-eval-dynamic': 'error',
   'ai-guard/no-broad-exception': 'warn',
-  'ai-guard/require-auth-middleware': 'warn',
+  // Async
+  'ai-guard/no-floating-promise': 'error',
   'ai-guard/no-await-in-loop': 'warn',
   'ai-guard/no-async-without-await': 'warn',
-  'ai-guard/no-sql-string-concat': 'warn',
   'ai-guard/no-async-array-callback': 'warn',
+  // Security
+  'ai-guard/no-hardcoded-secret': 'error',
+  'ai-guard/no-eval-dynamic': 'error',
+  'ai-guard/no-sql-string-concat': 'warn',
   'ai-guard/no-unsafe-deserialize': 'warn',
+  'ai-guard/require-auth-middleware': 'warn',
   'ai-guard/require-authz-check': 'warn',
+  // AI Patterns
+  'ai-guard/no-dead-branch': 'warn',
 };
 
 const STRICT_RULES: Record<string, RuleLevel> = {
+  // Reliability
   'ai-guard/no-empty-catch': 'error',
   'ai-guard/no-broad-exception': 'error',
   'ai-guard/no-catch-log-rethrow': 'error',
   'ai-guard/no-catch-without-use': 'error',
+  // Async
   'ai-guard/no-async-array-callback': 'error',
   'ai-guard/no-floating-promise': 'error',
   'ai-guard/no-await-in-loop': 'error',
   'ai-guard/no-async-without-await': 'error',
   'ai-guard/no-redundant-await': 'error',
+  // Security
   'ai-guard/no-hardcoded-secret': 'error',
   'ai-guard/no-eval-dynamic': 'error',
   'ai-guard/no-sql-string-concat': 'error',
   'ai-guard/no-unsafe-deserialize': 'error',
   'ai-guard/require-auth-middleware': 'error',
   'ai-guard/require-authz-check': 'error',
+  // AI Patterns
   'ai-guard/no-console-in-handler': 'error',
   'ai-guard/no-duplicate-logic-block': 'error',
+  'ai-guard/no-dead-branch': 'error',
 };
 
 const SECURITY_RULES: Record<string, RuleLevel> = {
@@ -327,6 +338,8 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   const ruleBreakdown = new Map<string, number>();
   let totalErrors = 0;
   let totalWarnings = 0;
+  // Count all results (including those with no issues) as scanned
+  const filesScanned = rawResults.length;
 
   for (const result of rawResults) {
     if (result.messages.length === 0) continue;
@@ -366,6 +379,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     totalErrors,
     totalWarnings,
     totalIssues: totalErrors + totalWarnings,
+    filesScanned,
     ruleBreakdown,
     topFiles,
     durationMs,

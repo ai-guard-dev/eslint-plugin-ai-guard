@@ -1,0 +1,50 @@
+# Example: Add AI Guard scanning to your GitHub Actions workflow
+# Copy this file to .github/workflows/ai-guard.yml in your project
+
+name: AI Guard
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  ai-guard-scan:
+    name: AI Guard Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Option 1: Quick scan with recommended preset (lowest noise)
+      - name: Run AI Guard (recommended)
+        run: npx ai-guard run --path src
+
+      # Option 2: Strict scan — fail on any warning
+      # - name: Run AI Guard (strict)
+      #   run: npx ai-guard run --strict --max-warnings 0
+
+      # Option 3: Security-only scan
+      # - name: Run AI Guard (security)
+      #   run: npx ai-guard run --security --path src
+
+      # Option 4: Save JSON output for further processing
+      # - name: Run AI Guard (JSON output)
+      #   run: npx ai-guard run --json > ai-guard-results.json
+
+      # Option 5: Baseline mode — only fail on NEW issues since baseline
+      # - name: Run AI Guard (baseline)
+      #   run: |
+      #     npx ai-guard baseline --check
+      #     npx ai-guard run --max-warnings 0

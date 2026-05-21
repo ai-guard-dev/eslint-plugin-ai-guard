@@ -54,12 +54,15 @@ const PUBLIC_ROUTE_PATTERNS = [
   /^\/forgot/,                       // forgot password
   /^\/reset/,                        // reset password
   /^\/webhook/,                      // webhooks
+  /^\/callback/,                     // OAuth callback
   /^\/public/,                       // explicitly public
   /^\/assets/,                       // static assets
   /^\/static/,                       // static files
   /^\/favicon/,                      // favicon
   /^\/robots/,                       // robots.txt
   /^\/sitemap/,                      // sitemap
+  /^\/api\/docs/,                    // API documentation (Swagger, etc.)
+  /^\/docs/,                         // documentation
 ];
 
 export const requireAuthMiddleware = createRule({
@@ -189,6 +192,19 @@ function isAuthMiddleware(node: TSESTree.Node, authNames: Set<string>): boolean 
   // Direct identifier: protect, authenticate, etc.
   if (node.type === AST_NODE_TYPES.Identifier) {
     return authNames.has(node.name);
+  }
+
+  // Fastify-style options object: { preHandler: authenticate, onRequest: verifyToken }
+  if (node.type === AST_NODE_TYPES.ObjectExpression) {
+    for (const prop of node.properties) {
+      if (
+        prop.type === AST_NODE_TYPES.Property &&
+        prop.key.type === AST_NODE_TYPES.Identifier &&
+        (prop.key.name === 'preHandler' || prop.key.name === 'onRequest')
+      ) {
+        if (isAuthMiddleware(prop.value, authNames)) return true;
+      }
+    }
   }
 
   // Call expression: authenticate('jwt'), authorize('admin')

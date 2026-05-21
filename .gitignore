@@ -27,3 +27,4 @@ ai-guard-reference.*
 test-sample.tsx
 *.tgz
 .vscode/
+tmp-test-project/
