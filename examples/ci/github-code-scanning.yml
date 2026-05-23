@@ -1,0 +1,67 @@
+# GitHub Code Scanning with AI Guard
+#
+# This workflow runs ai-guard and uploads results to GitHub Code Scanning.
+# Results appear as PR annotations and in the Security > Code Scanning tab.
+#
+# Prerequisites:
+#   1. npm install --save-dev eslint-plugin-ai-guard
+#   2. Copy this file to .github/workflows/ai-guard-code-scanning.yml
+#
+# Required permission: security-events: write
+# (already included below)
+
+name: AI Guard Code Scanning
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  schedule:
+    # Weekly baseline scan — Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+
+jobs:
+  ai-guard-scan:
+    name: AI Guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # Required to upload SARIF to Code Scanning
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Option A: Scan using the CLI (recommended — zero ESLint config needed)
+      - name: Run AI Guard (SARIF output)
+        run: |
+          npx ai-guard run --path src --sarif > ai-guard-results.sarif
+        continue-on-error: true   # Don't fail the workflow on findings — upload first
+
+      # Option B: If you want to fail the build on errors, use this instead:
+      # - name: Run AI Guard (SARIF output)
+      #   run: npx ai-guard run --path src --sarif > ai-guard-results.sarif
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()    # Upload even if the scan found issues
+        with:
+          sarif_file: ai-guard-results.sarif
+          category: ai-guard
+
+      # Optional: Also output a human-readable summary for the Actions log
+      - name: AI Guard summary
+        if: always()
+        run: npx ai-guard run --path src --quiet
+        continue-on-error: true

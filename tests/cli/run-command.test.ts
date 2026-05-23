@@ -8,9 +8,13 @@ function makeResult(overrides: Partial<RunResult> = {}): RunResult {
     totalErrors: 0,
     totalWarnings: 0,
     totalIssues: 0,
+    filesScanned: 0,
     ruleBreakdown: new Map(),
     topFiles: [],
     durationMs: 0,
+    ecosystemIssues: [],
+    parserErrors: [],
+    tsParserAvailable: true,
     ...overrides,
   };
 }

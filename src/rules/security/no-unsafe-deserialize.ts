@@ -5,6 +5,28 @@ const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
 );
 
+// Files where JSON.parse on internal data is expected and safe
+const INTERNAL_FILE_PATTERNS = [
+  /[\\/]debug[\\/]/i,
+  /[\\/]scripts[\\/]/i,
+  /[\\/]tools[\\/]/i,
+  /[\\/]migrations?[\\/]/i,
+  /[\\/]seeds?[\\/]/i,
+  /[\\/]fixtures[\\/]/i,
+  /check[-_]server/i,
+  /debug[-_]server/i,
+  /diagnostics/i,
+  /seed\./i,
+  /migrate?\./i,
+  /setup\./i,
+  /scaffold\./i,
+  /test[-_].*\.js$/i,
+];
+
+function isInternalToolingFile(filePath: string): boolean {
+  return INTERNAL_FILE_PATTERNS.some((p) => p.test(filePath));
+}
+
 const UNTRUSTED_IDENTIFIER_NAMES = [
   'input',
   'userInput',
@@ -75,11 +97,15 @@ export const noUnsafeDeserialize = createRule({
     schema: [],
     messages: {
       unsafeDeserialize:
-        'Potential unsafe deserialization: JSON.parse() is used on likely untrusted input without visible schema validation. AI tools frequently generate this shortcut. Validate input before parsing.',
+        'JSON.parse() on likely untrusted input without visible schema validation. Validate or sanitize the input before parsing to prevent deserialization of unexpected data.',
     },
   },
   defaultOptions: [],
   create(context) {
+    // Suppress in internal tooling files where JSON.parse on internal data is expected
+    const filePath = context.filename ?? context.getFilename?.() ?? '';
+    if (isInternalToolingFile(filePath)) return {};
+
     return {
       CallExpression(node) {
         if (!isJsonParseCall(node)) {

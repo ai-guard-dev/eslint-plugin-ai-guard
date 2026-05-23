@@ -17,6 +17,21 @@ const AUTHZ_HELPER_NAMES = [
   'hasAccess',
 ] as const;
 
+// ─── Context detection (shared with require-auth-middleware) ──────────────────
+const ELECTRON_PATH_PATTERNS = [
+  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /preload\.js$/, /background\.js$/,
+];
+const INTERNAL_SCRIPT_PATTERNS = [
+  /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
+  /[\\/]debug[\\/]/i, /seed\./i, /migrate?\./i, /setup\./i,
+];
+function isElectronOrInternalFile(filePath: string): boolean {
+  return (
+    ELECTRON_PATH_PATTERNS.some((p) => p.test(filePath)) ||
+    INTERNAL_SCRIPT_PATTERNS.some((p) => p.test(filePath))
+  );
+}
+
 function isRouteRegistrationCall(node: TSESTree.CallExpression): boolean {
   if (
     node.callee.type !== AST_NODE_TYPES.MemberExpression ||
@@ -209,11 +224,15 @@ export const requireAuthzCheck = createRule({
     schema: [],
     messages: {
       missingAuthz:
-        'Potential missing authorization check. This handler uses resource identifiers (like req.params.id) but no visible ownership/authorization guard was found. AI tools frequently miss authz after auth.',
+        'Handler accesses resource identifiers (e.g., req.params.id) without a visible authorization check. Verify ownership or permission is enforced before the resource is returned or modified.',
     },
   },
   defaultOptions: [],
   create(context) {
+    // Suppress in Electron/internal files — auth is not relevant in these contexts
+    const filePath = context.filename ?? context.getFilename?.() ?? '';
+    if (isElectronOrInternalFile(filePath)) return {};
+
     return {
       CallExpression(node) {
         if (!isRouteRegistrationCall(node)) {

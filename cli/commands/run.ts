@@ -2,7 +2,8 @@ import type { Command } from 'commander';
 import ora from 'ora';
 import chalk from 'chalk';
 import { runEslint, type Preset, type EcosystemIssue } from '../utils/eslint-runner.js';
-import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, CONFIDENCE_TIER } from '../utils/logger.js';
+import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, CONFIDENCE_TIER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
+import { buildSarifLog, sarifToJson } from '../utils/sarif.js';
 import type { RunResult } from '../utils/eslint-runner.js';
 
 export function registerRunCommand(program: Command): void {
@@ -13,20 +14,24 @@ export function registerRunCommand(program: Command): void {
     .option('--strict', 'Use the strict rule preset (all rules at error)')
     .option('--security', 'Use the security-only rule preset')
     .option('--json', 'Output results as JSON (CI-friendly)')
+    .option('--sarif', 'Output results as SARIF 2.1.0 (for GitHub Code Scanning)')
     .option(
       '--max-warnings <n>',
       'Fail with exit code 1 if warnings exceed this count',
       (value: string) => Number.parseInt(value, 10),
     )
     .option('--verbose', 'Show all issues — disable grouping of repeated warnings')
+    .option('--quiet', 'Only show errors — suppress warnings and informational hints')
     .option('--debug-timing', 'Print per-phase timing diagnostics')
     .action(async (opts: {
       path: string;
       strict?: boolean;
       security?: boolean;
       json?: boolean;
+      sarif?: boolean;
       maxWarnings?: number;
       verbose?: boolean;
+      quiet?: boolean;
       debugTiming?: boolean;
     }) => {
       if (
@@ -91,9 +96,19 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
-      // ─── JSON mode ─────────────────────────────────────────────────────────
+      // ─── SARIF mode ─────────────────────────────────────────────────────────────────
+
+      if (opts.sarif) {
+        const sarifLog = buildSarifLog(result);
+        console.log(sarifToJson(sarifLog));
+        process.exit(getRunExitCode(result, opts.maxWarnings));
+        return;
+      }
+
+      // ─── JSON mode ─────────────────────────────────────────────────────────────────
 
       if (opts.json) {
+        const signalSummary = buildSignalSummary(result);
         const jsonOutput = {
           preset,
           scannedPath: opts.path,
@@ -103,6 +118,7 @@ export function registerRunCommand(program: Command): void {
           totalIssues: result.totalIssues,
           durationMs: result.durationMs,
           timing: result.timing,
+          signalSummary,
           ruleBreakdown: Object.fromEntries(result.ruleBreakdown),
           topFiles: result.topFiles,
           files: result.files,
@@ -145,9 +161,14 @@ export function registerRunCommand(program: Command): void {
         log.blank();
       }
 
-      // ── AI Guard Findings ─────────────────────────────────────────────────────
+      // ── AI Guard Findings ──────────────────────────────────────────────────
 
       if (result.totalIssues > 0) {
+        const verbose = opts.verbose ?? false;
+        const quiet = opts.quiet ?? false;
+
+        // Separate informational from actionable findings
+        const { actionableFiles, informationalFiles } = partitionByTier(result, quiet);
 
         // Category summary with icons
         log.section('Summary by Category');
@@ -155,7 +176,8 @@ export function registerRunCommand(program: Command): void {
         const categoryErrors: Record<string, number> = {};
         const categoryWarnings: Record<string, number> = {};
 
-        for (const file of result.files) {
+        // Only count actionable (non-informational) issues in category summary
+        for (const file of actionableFiles) {
           for (const issue of file.issues) {
             const cat = RULE_CATEGORY[issue.ruleId] ?? 'Other';
             if (issue.severity === 2) {
@@ -206,14 +228,17 @@ export function registerRunCommand(program: Command): void {
           );
           for (const [rule, count] of sorted) {
             const shortRule = rule.replace(/^ai-guard\//, '');
-            const tier = CONFIDENCE_TIER[rule];
+            const tier = CONFIDENCE_TIER[rule] as ConfidenceTier | undefined;
             const tierLabel = tier === 'high'
               ? chalk.red.dim('[high]')
               : tier === 'medium'
               ? chalk.yellow.dim('[medium]')
+              : tier === 'informational'
+              ? chalk.gray.dim('[info]')
               : chalk.gray.dim('[low]');
+            if (quiet && tier === 'informational') continue;
             log.print(
-              `    ${chalk.gray('•')} ${chalk.yellow(shortRule)} ${tierLabel}${chalk.gray(':')} ${chalk.white(String(count))}`,
+              `    ${chalk.gray('\u2022')} ${chalk.yellow(shortRule)} ${tierLabel}${chalk.gray(':')} ${chalk.white(String(count))}`,
             );
           }
           log.blank();
@@ -224,18 +249,34 @@ export function registerRunCommand(program: Command): void {
           log.section('Top Files');
           for (const { path: fp, count } of result.topFiles) {
             log.print(
-              `    ${chalk.gray('•')} ${chalk.white(fp)} ${chalk.gray(`(${count})`)}`,
+              `    ${chalk.gray('\u2022')} ${chalk.white(fp)} ${chalk.gray(`(${count})`)}`,
             );
           }
           log.blank();
         }
 
-        // Issues by File — with grouping of repeated low-confidence warnings
-        log.section('Issues by File');
-        log.blank();
+        // Issues by File — actionable findings
+        if (actionableFiles.length > 0) {
+          log.section('Issues by File');
+          log.blank();
+          renderIssuesByFile({ ...result, files: actionableFiles }, verbose, quiet);
+        }
 
-        const verbose = opts.verbose ?? false;
-        renderIssuesByFile(result, verbose);
+        // Informational hints — collapsed by default
+        const totalInfoCount = informationalFiles.reduce((n, f) => n + f.issues.length, 0);
+        if (totalInfoCount > 0 && !quiet) {
+          if (verbose) {
+            log.section('Informational Hints');
+            log.print(chalk.dim(`  Stylistic hints with higher false-positive rate — review before acting.`));
+            log.blank();
+            renderIssuesByFile({ ...result, files: informationalFiles }, true, false);
+          } else {
+            log.blank();
+            log.print(
+              `  ${chalk.gray('\u25b8')}  ${chalk.gray(`${totalInfoCount} informational hint${totalInfoCount !== 1 ? 's' : ''} — run with ${chalk.cyan('--verbose')} to expand`)}`,
+            );
+          }
+        }
       }
 
       // ── ESLint Ecosystem Issues ───────────────────────────────────────────────
@@ -319,6 +360,58 @@ export function registerRunCommand(program: Command): void {
 
 const GROUP_THRESHOLD = 4; // Group if same rule appears >= this many times in a file
 
+/** Partition files into actionable and informational based on confidence tier */
+function partitionByTier(
+  result: RunResult,
+  quiet: boolean,
+): { actionableFiles: RunResult['files']; informationalFiles: RunResult['files'] } {
+  const actionableFiles: RunResult['files'] = [];
+  const informationalFiles: RunResult['files'] = [];
+
+  for (const file of result.files) {
+    const actionableIssues = file.issues.filter((i) => {
+      const tier = CONFIDENCE_TIER[i.ruleId] as ConfidenceTier | undefined;
+      if (quiet && (tier === 'informational' || i.severity === 1)) return false;
+      return tier !== 'informational';
+    });
+    const infoIssues = file.issues.filter((i) => {
+      const tier = CONFIDENCE_TIER[i.ruleId] as ConfidenceTier | undefined;
+      return tier === 'informational';
+    });
+
+    if (actionableIssues.length > 0) {
+      actionableFiles.push({ ...file, issues: actionableIssues });
+    }
+    if (infoIssues.length > 0) {
+      informationalFiles.push({ ...file, issues: infoIssues });
+    }
+  }
+
+  return { actionableFiles, informationalFiles };
+}
+
+/** Build signal summary for JSON output — replaces misleading numeric score */
+function buildSignalSummary(result: RunResult): {
+  high: number; medium: number; low: number; informational: number;
+  ecosystemIssues: number; parserErrors: number;
+} {
+  let high = 0, medium = 0, low = 0, informational = 0;
+  for (const file of result.files) {
+    for (const issue of file.issues) {
+      const tier = CONFIDENCE_TIER[issue.ruleId] as ConfidenceTier | undefined;
+      if (tier === 'high') high++;
+      else if (tier === 'medium') medium++;
+      else if (tier === 'informational') informational++;
+      else low++;
+    }
+  }
+  return {
+    high, medium, low, informational,
+    ecosystemIssues: result.ecosystemIssues.length,
+    parserErrors: result.parserErrors.length,
+  };
+}
+
 function hasGroupedWarnings(result: RunResult): boolean {
   for (const file of result.files) {
     const ruleCounts = new Map<string, number>();
@@ -332,7 +425,7 @@ function hasGroupedWarnings(result: RunResult): boolean {
   return false;
 }
 
-function renderIssuesByFile(result: RunResult, verbose: boolean): void {
+function renderIssuesByFile(result: RunResult, verbose: boolean, quiet = false): void {
   for (const file of result.files) {
     log.print(
       `  ${chalk.bold.white(file.filePath)} ` +
@@ -385,12 +478,10 @@ function renderSingleIssue(issue: { ruleId: string; severity: 1 | 2; message: st
     : chalk.yellow(' warn');
   const loc = chalk.gray(`${String(issue.line)}:${String(issue.column)}`).padEnd(12);
   const ruleShort = chalk.gray(issue.ruleId.replace(/^ai-guard\//, ''));
-  const tier = CONFIDENCE_TIER[issue.ruleId];
-  const tierTag = tier === 'high'
-    ? ''
-    : tier === 'medium'
-    ? ''
-    : chalk.dim(' [low]');
+  const tier = CONFIDENCE_TIER[issue.ruleId] as ConfidenceTier | undefined;
+  const tierTag = tier === 'informational'
+    ? chalk.dim(' [info]')
+    : '';
   log.print(
     `    ${loc} ${sev}  ${chalk.white(issue.message)}${tierTag}  ${ruleShort}`,
   );

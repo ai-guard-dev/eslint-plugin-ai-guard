@@ -37,12 +37,15 @@ export const RULE_CATEGORY: Record<string, string> = {
   'ai-guard/no-dead-branch': 'AI Patterns',
 };
 
-// ── Confidence tiers ──────────────────────────────────────────────────────────
-// high   = very low FP rate, high signal, should always be investigated
-// medium = moderate confidence, context-dependent
-// low    = style/suggestion level, may have intentional exceptions
+// ── Confidence tiers ─────────────────────────────────────────────────
+// high          = near-zero FP rate, always investigate
+// medium        = context matters, usually valid
+// low           = may be intentional, review case-by-case
+// informational = stylistic hint, almost certainly intentional — collapsed by default
 
-export const CONFIDENCE_TIER: Record<string, 'high' | 'medium' | 'low'> = {
+export type ConfidenceTier = 'high' | 'medium' | 'low' | 'informational';
+
+export const CONFIDENCE_TIER: Record<string, ConfidenceTier> = {
   // High confidence — near-zero false positive rate
   'ai-guard/no-hardcoded-secret': 'high',
   'ai-guard/no-eval-dynamic': 'high',
@@ -56,15 +59,21 @@ export const CONFIDENCE_TIER: Record<string, 'high' | 'medium' | 'low'> = {
   'ai-guard/no-catch-log-rethrow': 'medium',
   'ai-guard/no-catch-without-use': 'medium',
   'ai-guard/no-unsafe-deserialize': 'medium',
-  // Low confidence — suggestions, may be intentional
-  'ai-guard/no-async-without-await': 'low',
+  // Low confidence — review case-by-case
   'ai-guard/no-async-array-callback': 'low',
   'ai-guard/no-dead-branch': 'low',
   'ai-guard/no-broad-exception': 'low',
   'ai-guard/no-console-in-handler': 'low',
   'ai-guard/no-duplicate-logic-block': 'low',
-  'ai-guard/no-redundant-await': 'low',
+  // Informational — mostly stylistic, high framework FP rate, collapsed by default
+  'ai-guard/no-async-without-await': 'informational',
+  'ai-guard/no-redundant-await': 'informational',
 };
+
+/** Returns true if the tier should be collapsed in default (non-verbose) output */
+export function isCollapsedByDefault(tier: ConfidenceTier): boolean {
+  return tier === 'informational';
+}
 
 // ── Ecosystem issue fix suggestions ──────────────────────────────────────────
 

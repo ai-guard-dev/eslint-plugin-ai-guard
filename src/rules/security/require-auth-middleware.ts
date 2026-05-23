@@ -40,20 +40,25 @@ const DEFAULT_AUTH_MIDDLEWARE_NAMES = new Set([
  * Route paths that are commonly public and should not require auth.
  */
 const PUBLIC_ROUTE_PATTERNS = [
-  /^\/?$/,                           // '/' root
+  /^\/?\s*$/,                        // '/' root or empty
   /^\*$/,                            // '*' SPA fallback
-  /^\/\*$/,                         // '/*' SPA fallback
+  /^\/\*$/,                          // '/*' SPA fallback
   /^\/health/,                       // health checks
   /^\/ping/,                         // ping
   /^\/status/,                       // status
-  /^\/api\/v\d+\/auth/,              // auth routes
+  /^\/metrics/,                      // Prometheus metrics
+  /^\/ready/,                        // readiness probe
+  /^\/live/,                         // liveness probe
+  /^\/api\/v\d+\/auth/,              // versioned auth routes
   /^\/auth/,                         // auth routes
   /^\/login/,                        // login
+  /^\/logout/,                       // logout
   /^\/register/,                     // register
   /^\/signup/,                       // signup
   /^\/forgot/,                       // forgot password
   /^\/reset/,                        // reset password
-  /^\/webhook/,                      // webhooks
+  /^\/verify/,                       // email verification
+  /^\/webhook/,                      // webhooks (typically verified by signature)
   /^\/callback/,                     // OAuth callback
   /^\/public/,                       // explicitly public
   /^\/assets/,                       // static assets
@@ -63,7 +68,68 @@ const PUBLIC_ROUTE_PATTERNS = [
   /^\/sitemap/,                      // sitemap
   /^\/api\/docs/,                    // API documentation (Swagger, etc.)
   /^\/docs/,                         // documentation
+  /^\/swagger/,                      // Swagger UI
+  /^\/graphql/,                      // GraphQL (handles own auth)
+  /^\/debug/,                        // debug endpoints
+  /^\/diagnostics/,                  // diagnostics endpoints
+  /^\/internal/,                     // internal routes
+  /^\/dev/,                          // dev-only routes
 ];
+
+// ─── Context detection helpers ─────────────────────────────────────────────────
+//
+// These heuristics determine whether the current file is likely an internal
+// or localhost-only service where auth requirements are different from a
+// production API. False positives in these contexts erode trust.
+
+/**
+ * Path segments that suggest an Electron app main/preload/renderer process.
+ * In Electron apps, localhost routes serve the renderer — auth is unnecessary.
+ */
+const ELECTRON_PATH_PATTERNS = [
+  /[\\/]electron[\\/]/i,
+  /[\\/]electron-main/i,
+  /[\\/]electron-preload/i,
+  /\bmain\.js$/,
+  /\bpreload\.js$/,
+  /\bbackground\.js$/,
+  /\belectron\.js$/,
+];
+
+/**
+ * File name patterns for internal tooling, scripts, and dev utilities.
+ * These files are never exposed in production — auth is not relevant.
+ */
+const INTERNAL_SCRIPT_PATTERNS = [
+  /[\\/]scripts[\\/]/i,
+  /[\\/]tools[\\/]/i,
+  /[\\/]migrations?[\\/]/i,
+  /[\\/]seeds?[\\/]/i,
+  /[\\/]fixtures[\\/]/i,
+  /[\\/]dev[\\/]/i,
+  /[\\/]debug[\\/]/i,
+  /[\\/]diagnostics[\\/]/i,
+  /\bdebug[-_]server/i,
+  /\bdev[-_]server/i,
+  /\bcheck[-_]server/i,
+  /\blocal[-_]server/i,
+  /\bseed\./i,
+  /\bmigrate?\./i,
+  /\bsetup\./i,
+  /\bscaffold\./i,
+  /\binit\./i,
+  /\bbootstrap\./i,
+];
+
+function isElectronFile(filePath: string): boolean {
+  return ELECTRON_PATH_PATTERNS.some((p) => p.test(filePath));
+}
+
+function isInternalScript(filePath: string): boolean {
+  return INTERNAL_SCRIPT_PATTERNS.some((p) => p.test(filePath));
+}
+
+// ─── Rule ─────────────────────────────────────────────────────────────────────
 
 export const requireAuthMiddleware = createRule({
   name: 'require-auth-middleware',
@@ -71,7 +137,7 @@ export const requireAuthMiddleware = createRule({
     type: 'suggestion',
     docs: {
       description:
-        'Require authentication middleware on Express/Fastify route definitions. AI tools frequently generate route handlers without auth middleware, creating unprotected endpoints that expose sensitive data or operations.',
+        'Require authentication middleware on Express/Fastify route definitions. AI tools frequently generate route handlers without auth middleware, creating unprotected endpoints.',
     },
     fixable: undefined,
     schema: [
@@ -83,21 +149,65 @@ export const requireAuthMiddleware = createRule({
             items: { type: 'string' },
             description: 'Additional custom middleware names to recognize as authentication middleware.',
           },
+          allowElectronApps: {
+            type: 'boolean',
+            description: 'Suppress findings in Electron main/preload files (default: true). Electron localhost routes do not need web auth middleware.',
+          },
+          allowInternalScripts: {
+            type: 'boolean',
+            description: 'Suppress findings in internal tooling files (migration, seed, debug, dev-server). These are never production-exposed (default: true).',
+          },
+          internalPathPatterns: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Additional file path patterns to treat as internal (suppressed).',
+          },
         },
         additionalProperties: false,
       },
     ],
     messages: {
       missingAuth:
-        'Route `{{method}} {{path}}` appears to have no authentication middleware. AI tools frequently generate routes without auth checks, creating unprotected endpoints. Add authentication middleware (e.g., `protect`, `authenticate`) to the handler chain.',
+        'Route `{{method}} {{path}}` appears to lack authentication middleware. Verify that auth is applied at the router level, or add middleware (e.g., `protect`, `authenticate`) to the handler chain.',
     },
   },
-  defaultOptions: [{}] as [{ authMiddlewareNames?: string[] }],
+  defaultOptions: [{}] as [
+    {
+      authMiddlewareNames?: string[];
+      allowElectronApps?: boolean;
+      allowInternalScripts?: boolean;
+      internalPathPatterns?: string[];
+    }
+  ],
   create(context, [options]) {
+    const allowElectronApps = options.allowElectronApps !== false; // default true
+    const allowInternalScripts = options.allowInternalScripts !== false; // default true
     const customNames = new Set(options.authMiddlewareNames ?? []);
     const allAuthNames = new Set([...DEFAULT_AUTH_MIDDLEWARE_NAMES, ...customNames]);
+    const extraPatterns = (options.internalPathPatterns ?? []).map((p) => new RegExp(p, 'i'));
 
-    // Track if router.use(protect) is applied (route-level auth covers all subsequent routes)
+    const filePath = context.filename ?? context.getFilename?.() ?? '';
+
+    // ── File-level context suppression ─────────────────────────────────────
+    // Suppress entirely for files that are known non-production contexts.
+    // This eliminates the most common false-positive sources without any
+    // AST analysis overhead.
+
+    if (allowElectronApps && isElectronFile(filePath)) {
+      return {}; // Electron main/preload — localhost routes don't need web auth
+    }
+
+    if (allowInternalScripts && isInternalScript(filePath)) {
+      return {}; // Internal tooling — not production-exposed
+    }
+
+    if (extraPatterns.some((p) => p.test(filePath))) {
+      return {}; // User-defined internal path
+    }
+
+    // ── Route analysis ────────────────────────────────────────────────────
+
+    // Track if router.use(protect) is applied (blanket auth covers all subsequent routes)
     let hasRouterUseAuth = false;
 
     return {
@@ -231,11 +341,9 @@ function getPathString(node: TSESTree.Node): string | null {
     return node.value;
   }
   if (node.type === AST_NODE_TYPES.TemplateLiteral) {
-    // If it has no expressions, just return the only quasi
     if (node.expressions.length === 0 && node.quasis.length === 1) {
       return node.quasis[0].value.cooked ?? null;
     }
-    // If it has expressions (e.g., `/webhook/${dynamic}`), return the first literal part
     if (node.quasis.length > 0) {
       return node.quasis[0].value.cooked ?? null;
     }

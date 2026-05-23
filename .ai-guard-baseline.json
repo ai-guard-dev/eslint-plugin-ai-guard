@@ -1,0 +1,47 @@
+{
+  "createdAt": "2026-05-23T14:04:03.614Z",
+  "preset": "recommended",
+  "mode": "stable",
+  "totalIssues": 4,
+  "entries": [
+    {
+      "filePath": "tests\\fixtures\\express-api\\app.js",
+      "issues": [
+        {
+          "ruleId": "ai-guard/no-async-without-await",
+          "message": "Async function does not contain `await`. AI tools frequently add `async` unnecessarily, which can mislead callers and mask intent. Remove `async` or add proper await logic.",
+          "line": 21,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "filePath": "tests\\fixtures\\plain-js\\utils.js",
+      "issues": [
+        {
+          "ruleId": "ai-guard/no-async-without-await",
+          "message": "Async function does not contain `await`. AI tools frequently add `async` unnecessarily, which can mislead callers and mask intent. Remove `async` or add proper await logic.",
+          "line": 7,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "filePath": "tests\\fixtures\\simulation-demo\\canvas-animation.js",
+      "issues": [
+        {
+          "ruleId": "ai-guard/no-async-without-await",
+          "message": "Async function does not contain `await`. AI tools frequently add `async` unnecessarily, which can mislead callers and mask intent. Remove `async` or add proper await logic.",
+          "line": 20,
+          "column": 1
+        },
+        {
+          "ruleId": "ai-guard/no-async-without-await",
+          "message": "Async function does not contain `await`. AI tools frequently add `async` unnecessarily, which can mislead callers and mask intent. Remove `async` or add proper await logic.",
+          "line": 24,
+          "column": 1
+        }
+      ]
+    }
+  ]
+}
