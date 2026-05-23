@@ -230,6 +230,89 @@ export function registerDoctorCommand(program: Command): void {
         });
       }
 
+      // ── Check 10: @typescript-eslint/utils resolvable at runtime ──────────
+      {
+        let utilsOk = false;
+        let utilsVersion: string | null = null;
+        try {
+          const { createRequire } = await import('module');
+          const req = createRequire(path.join(cwd, 'package.json'));
+          const pkgPath = req.resolve('@typescript-eslint/utils/package.json');
+          const pkg = JSON.parse(
+            (await import('fs')).readFileSync(pkgPath, 'utf-8'),
+          ) as { version?: string };
+          utilsVersion = pkg.version ?? null;
+          utilsOk = true;
+        } catch {
+          // Not found
+        }
+
+        if (!utilsOk) {
+          // Fall back to checking our own package location
+          try {
+            const selfDir = path.dirname(
+              new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
+            );
+            const pkgPath = path.join(selfDir, '../../node_modules/@typescript-eslint/utils/package.json');
+            if ((await import('fs')).existsSync(pkgPath)) {
+              utilsOk = true;
+            }
+          } catch { /* skip */ }
+        }
+
+        checks.push({
+          label: '@typescript-eslint/utils available at runtime',
+          pass: utilsOk,
+          detail: utilsOk
+            ? `Found${utilsVersion ? ` v${utilsVersion}` : ''}`
+            : 'Not found — rule engine may crash on fresh installs',
+          fix: utilsOk
+            ? undefined
+            : 'npm install @typescript-eslint/utils',
+          note: utilsOk
+            ? undefined
+            : 'This is a runtime dependency of eslint-plugin-ai-guard rules.',
+        });
+      }
+
+      // ── Check 11: @typescript-eslint/parser for TS projects ───────────────
+      {
+        let parserOk = false;
+        let parserVersion: string | null = null;
+        try {
+          const { createRequire } = await import('module');
+          const req = createRequire(path.join(cwd, 'package.json'));
+          const pkgPath = req.resolve('@typescript-eslint/parser/package.json');
+          const pkg = JSON.parse(
+            (await import('fs')).readFileSync(pkgPath, 'utf-8'),
+          ) as { version?: string };
+          parserVersion = pkg.version ?? null;
+          parserOk = true;
+        } catch {
+          // Optional — only needed for TS projects
+        }
+
+        const hasTsFiles = (() => {
+          try {
+            const { readdirSync } = require('fs');
+            const files = readdirSync(cwd) as string[];
+            return files.some((f: string) => f.endsWith('.ts') || f.endsWith('.tsx'));
+          } catch {
+            return false;
+          }
+        })();
+
+        if (!parserOk && hasTsFiles) {
+          checks.push({
+            label: '@typescript-eslint/parser installed (TypeScript project)',
+            pass: false,
+            detail: '.ts/.tsx files detected but TypeScript parser not found',
+            fix: 'npm install --save-dev @typescript-eslint/parser',
+            note: 'TypeScript files will use espree fallback without this — some rules may not work correctly.',
+          });
+        }
+      }
+
       // ─── Render results ────────────────────────────────────────────────────
 
       log.section('Diagnostics');

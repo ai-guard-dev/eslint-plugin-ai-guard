@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import type { EcosystemIssue, ParserError } from '../utils/eslint-runner.js';
 
 // ── Category icon + color map ──────────────────────────────────────────────────
 
@@ -36,6 +37,56 @@ export const RULE_CATEGORY: Record<string, string> = {
   'ai-guard/no-dead-branch': 'AI Patterns',
 };
 
+// ── Confidence tiers ──────────────────────────────────────────────────────────
+// high   = very low FP rate, high signal, should always be investigated
+// medium = moderate confidence, context-dependent
+// low    = style/suggestion level, may have intentional exceptions
+
+export const CONFIDENCE_TIER: Record<string, 'high' | 'medium' | 'low'> = {
+  // High confidence — near-zero false positive rate
+  'ai-guard/no-hardcoded-secret': 'high',
+  'ai-guard/no-eval-dynamic': 'high',
+  'ai-guard/no-floating-promise': 'high',
+  'ai-guard/no-empty-catch': 'high',
+  // Medium confidence — context matters, usually valid
+  'ai-guard/no-sql-string-concat': 'medium',
+  'ai-guard/no-await-in-loop': 'medium',
+  'ai-guard/require-auth-middleware': 'medium',
+  'ai-guard/require-authz-check': 'medium',
+  'ai-guard/no-catch-log-rethrow': 'medium',
+  'ai-guard/no-catch-without-use': 'medium',
+  'ai-guard/no-unsafe-deserialize': 'medium',
+  // Low confidence — suggestions, may be intentional
+  'ai-guard/no-async-without-await': 'low',
+  'ai-guard/no-async-array-callback': 'low',
+  'ai-guard/no-dead-branch': 'low',
+  'ai-guard/no-broad-exception': 'low',
+  'ai-guard/no-console-in-handler': 'low',
+  'ai-guard/no-duplicate-logic-block': 'low',
+  'ai-guard/no-redundant-await': 'low',
+};
+
+// ── Ecosystem issue fix suggestions ──────────────────────────────────────────
+
+const ECOSYSTEM_FIX_HINTS: Record<string, string> = {
+  'react-hooks/exhaustive-deps': 'npm install --save-dev eslint-plugin-react-hooks',
+  'react-hooks/rules-of-hooks': 'npm install --save-dev eslint-plugin-react-hooks',
+  '@typescript-eslint/': 'npm install --save-dev @typescript-eslint/eslint-plugin @typescript-eslint/parser',
+  'import/': 'npm install --save-dev eslint-plugin-import',
+  'jsx-a11y/': 'npm install --save-dev eslint-plugin-jsx-a11y',
+  'prettier/': 'npm install --save-dev eslint-plugin-prettier',
+};
+
+function getEcosystemFix(ruleId: string | null): string | null {
+  if (!ruleId) return null;
+  for (const [prefix, fix] of Object.entries(ECOSYSTEM_FIX_HINTS)) {
+    if (ruleId.startsWith(prefix)) return fix;
+  }
+  return null;
+}
+
+// ── Logger ────────────────────────────────────────────────────────────────────
+
 const PREFIX = {
   success: chalk.green('✔'),
   error: chalk.red('✖'),
@@ -43,6 +94,8 @@ const PREFIX = {
   info: chalk.cyan('ℹ'),
   section: chalk.bold.white,
   bullet: chalk.gray('•'),
+  ecosystem: chalk.yellow('⚠'),
+  parser: chalk.magenta('⚡'),
 };
 
 export const log = {
@@ -68,6 +121,15 @@ export const log = {
     console.log('');
   },
 
+  /**
+   * Ecosystem section — distinct styling to communicate it's NOT ai-guard output
+   */
+  ecosystemSection(title: string): void {
+    console.log('');
+    console.log(chalk.bold.yellow(`  ── ${title} ──`) + chalk.dim(' (not ai-guard findings)'));
+    console.log('');
+  },
+
   rule(ruleName: string, count: number): void {
     console.log(
       `    ${PREFIX.bullet} ${chalk.yellow(ruleName)} ${chalk.gray(`(${count} issue${count !== 1 ? 's' : ''})`)}`,
@@ -88,8 +150,45 @@ export const log = {
   },
 
   /**
+   * Print an ESLint ecosystem issue (missing rule definition, foreign plugin rule, etc.)
+   * with a clear disclaimer that this is NOT an ai-guard finding.
+   */
+  ecosystemIssue(issue: EcosystemIssue, count = 1): void {
+    const ruleLabel = issue.ruleId ? chalk.yellow(issue.ruleId) : chalk.gray('(no rule id)');
+    const typeLabel =
+      issue.type === 'missing-rule'
+        ? chalk.dim('[missing rule definition]')
+        : issue.type === 'config-error'
+        ? chalk.dim('[config error]')
+        : chalk.dim('[foreign rule]');
+
+    const countLabel = count > 1 ? chalk.gray(` × ${count}`) : '';
+
+    console.log(`  ${PREFIX.ecosystem}  ${ruleLabel} ${typeLabel}${countLabel}`);
+    console.log(`       ${chalk.gray('File:')} ${chalk.dim(issue.filePath)}${issue.line > 0 ? chalk.dim(`:${issue.line}`) : ''}`);
+    console.log(`       ${chalk.gray('Msg:')}  ${chalk.dim(issue.message.slice(0, 120))}`);
+
+    const fix = getEcosystemFix(issue.ruleId);
+    if (fix) {
+      console.log(`       ${chalk.cyan('→ Fix:')} ${chalk.yellow(fix)}`);
+    }
+    console.log(
+      chalk.dim(`       Note: This comes from your ESLint config, not from ai-guard.`),
+    );
+    console.log('');
+  },
+
+  /**
+   * Print a parser/syntax error — clearly NOT an ai-guard finding.
+   */
+  parserError(pe: ParserError): void {
+    console.log(`  ${PREFIX.parser}  ${chalk.magenta('Parse failure')}  ${chalk.dim(pe.filePath)}${pe.line > 0 ? chalk.dim(`:${pe.line}`) : ''}`);
+    console.log(`       ${chalk.dim(pe.message.slice(0, 120))}`);
+    console.log('');
+  },
+
+  /**
    * Print a category summary line with icon, label, and count.
-   * e.g.  🔴 Security        3 errors · 0 warnings
    */
   category(icon: string, label: string, errors: number, warnings: number): void {
     const parts: string[] = [];
@@ -101,7 +200,7 @@ export const log = {
   },
 
   /**
-   * Print the scan stats line: files scanned, duration, preset.
+   * Print the scan stats line.
    */
   scanStats(filesScanned: number, filesWithIssues: number, durationMs: number, preset: string): void {
     console.log(

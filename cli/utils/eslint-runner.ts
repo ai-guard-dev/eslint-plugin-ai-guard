@@ -14,6 +14,7 @@ export interface RunOptions {
   targetPath: string;
   maxWarnings?: number;
   jsonOutput?: boolean;
+  debugTiming?: boolean;
 }
 
 export interface IssueDetail {
@@ -26,9 +27,40 @@ export interface IssueDetail {
 
 export interface FileResult {
   filePath: string;
-  issues: IssueDetail[];
+  issues: IssueDetail[];      // ai-guard/* findings only
   errorCount: number;
   warningCount: number;
+}
+
+/**
+ * An issue from a non-ai-guard rule (e.g., react-hooks/exhaustive-deps not found,
+ * foreign plugin rules, missing rule definitions). These are ESLint ecosystem issues
+ * and must NEVER appear in ai-guard findings or affect the score/confidence.
+ */
+export interface EcosystemIssue {
+  type: 'missing-rule' | 'foreign-rule' | 'config-error';
+  ruleId: string | null;
+  message: string;
+  filePath: string;
+  line: number;
+  column: number;
+}
+
+/**
+ * A fatal parse error — ESLint could not parse the file at all.
+ * Not an ai-guard finding. Shown in a separate section.
+ */
+export interface ParserError {
+  filePath: string;
+  message: string;
+  line: number;
+}
+
+export interface TimingBreakdown {
+  pluginLoadMs: number;
+  parserLoadMs: number;
+  lintMs: number;
+  processMs: number;
 }
 
 export interface RunResult {
@@ -40,11 +72,16 @@ export interface RunResult {
   ruleBreakdown: Map<string, number>;
   topFiles: Array<{ path: string; count: number }>;
   durationMs: number;
+  timing?: TimingBreakdown;
+  /** ESLint ecosystem issues — NOT ai-guard findings */
+  ecosystemIssues: EcosystemIssue[];
+  /** Fatal parser errors — NOT ai-guard findings */
+  parserErrors: ParserError[];
+  /** True if @typescript-eslint/parser was found and loaded */
+  tsParserAvailable: boolean;
 }
 
 // ─── Plugin normalizer ────────────────────────────────────────────────────────
-// Plugin exports `default` (ESM). When require()'d in CJS context it arrives as
-// { default: { rules, configs, meta } }. We normalise both shapes.
 
 type AiGuardPlugin = {
   rules: Record<string, unknown>;
@@ -124,9 +161,7 @@ const SECURITY_RULES: Record<string, RuleLevel> = {
   'ai-guard/require-authz-check': 'warn',
 };
 
-function getRules(
-  preset: Preset,
-): Record<string, RuleLevel> {
+function getRules(preset: Preset): Record<string, RuleLevel> {
   if (preset === 'strict') return STRICT_RULES;
   if (preset === 'security') return SECURITY_RULES;
   return RECOMMENDED_RULES;
@@ -144,25 +179,59 @@ const DEFAULT_IGNORE_PATTERNS = [
   '**/.git/**',
 ];
 
-// Some ESLint pattern scans should be skipped (not treated as fatal), e.g.:
-// - pattern has no matching files
-// - matched files are ignored by config/ignore rules
 export function isSkippablePatternError(error: Error): boolean {
   const msg = error.message.toLowerCase();
-
-  const hasNoFilesSignal =
+  return (
     msg.includes('no files') ||
-    msg.includes('no files matching');
-
-  const hasIgnoredSignal =
+    msg.includes('no files matching') ||
     msg.includes('ignored') ||
     msg.includes('all files matched by') ||
     msg.includes('are ignored') ||
     msg.includes('was ignored') ||
-    msg.includes('file ignored');
-
-  return hasNoFilesSignal || hasIgnoredSignal;
+    msg.includes('file ignored')
+  );
 }
+
+// ─── Message classifier ───────────────────────────────────────────────────────
+
+type MessageSource = 'ai-guard' | 'parser-error' | 'ecosystem';
+
+function classifyMessage(msg: { ruleId: string | null; fatal?: boolean; message: string }): MessageSource {
+  // Fatal parse errors (ESLint couldn't parse the file at all)
+  if (msg.fatal === true) return 'parser-error';
+
+  // Explicit parse errors in the message body
+  if (msg.ruleId === null && (
+    msg.message.startsWith('Parsing error') ||
+    msg.message.includes('Unexpected token') ||
+    msg.message.includes('SyntaxError')
+  )) {
+    return 'parser-error';
+  }
+
+  // Our rules — the only ones that count as ai-guard findings
+  if (msg.ruleId && msg.ruleId.startsWith('ai-guard/')) {
+    return 'ai-guard';
+  }
+
+  // Everything else: missing rule definitions, foreign plugin rules, config issues
+  return 'ecosystem';
+}
+
+function classifyEcosystemType(
+  msg: { ruleId: string | null; message: string },
+): EcosystemIssue['type'] {
+  const lower = msg.message.toLowerCase();
+  if (lower.includes('definition for rule') && lower.includes('was not found')) {
+    return 'missing-rule';
+  }
+  if (lower.includes('configuration') || lower.includes('config')) {
+    return 'config-error';
+  }
+  return 'foreign-rule';
+}
+
+// ─── Plugin loader ────────────────────────────────────────────────────────────
 
 async function loadPluginModuleFromCwd(cwd: string): Promise<unknown> {
   const { createRequire } = await import('module');
@@ -198,16 +267,26 @@ async function loadPluginModuleFromCwd(cwd: string): Promise<unknown> {
 // ─── Core runner ──────────────────────────────────────────────────────────────
 
 export async function runEslint(options: RunOptions): Promise<RunResult> {
+  const overallStart = Date.now();
+  const timing: TimingBreakdown = {
+    pluginLoadMs: 0,
+    parserLoadMs: 0,
+    lintMs: 0,
+    processMs: 0,
+  };
+
   const { ESLint } = await import('eslint').catch(() => {
     throw new Error(
       'ESLint is not installed. Run: npm install --save-dev eslint',
     );
   });
 
-  // Load the plugin — resolve relative to the user's cwd so it finds their install
+  // ── Load plugin ────────────────────────────────────────────────────────────
+  const pluginStart = Date.now();
   const rawPlugin = await loadPluginModuleFromCwd(process.cwd());
-
   const plugin = normalizePlugin(rawPlugin);
+  timing.pluginLoadMs = Date.now() - pluginStart;
+
   const rules = getRules(options.preset);
   const resolvedTargetPath = path.resolve(options.targetPath);
 
@@ -221,7 +300,30 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     ? path.dirname(resolvedTargetPath)
     : resolvedTargetPath;
 
-  const startMs = Date.now();
+  // ── Load TypeScript parser ─────────────────────────────────────────────────
+  const parserStart = Date.now();
+  let tsParser: unknown = null;
+  let tsParserAvailable = false;
+  try {
+    // Prefer parser from user's project, fall back to ours
+    try {
+      tsParser = require(path.join(
+        process.cwd(),
+        'node_modules',
+        '@typescript-eslint',
+        'parser',
+      ));
+    } catch {
+      tsParser = require('@typescript-eslint/parser');
+    }
+    tsParserAvailable = true;
+  } catch {
+    // TypeScript parser not available — ts/tsx files will use default espree parser
+    log.debug('@typescript-eslint/parser not found — TypeScript files will use espree fallback');
+  }
+  timing.parserLoadMs = Date.now() - parserStart;
+
+  // ── Build ESLint config ────────────────────────────────────────────────────
 
   const JS_TS_FILES = [
     '**/*.js',
@@ -234,30 +336,8 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     '**/*.cjs',
   ];
 
-  // ESLint v9 programmatic API: use overrideConfigFile to disable config file
-  // discovery and overrideConfig to inject our plugin config.
-  // For single-file scans, set cwd to the file's directory and lint only that file.
-
-  // Try to load TypeScript parser for .ts/.tsx files
-  let tsParser: unknown = null;
-  try {
-    // Try user's project first, then our own node_modules
-    try {
-      tsParser = require(path.join(
-        process.cwd(),
-        'node_modules',
-        '@typescript-eslint',
-        'parser',
-      ));
-    } catch {
-      tsParser = require('@typescript-eslint/parser');
-    }
-  } catch {
-    // TypeScript parser not available — ts files will use default espree parser
-  }
-
   const configBlocks: Array<Record<string, unknown>> = [
-    // JS/JSX files — default espree parser
+    // JS/JSX files — default espree parser with JSX support
     {
       files: ['**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs'],
       plugins: { 'ai-guard': plugin } as Record<string, unknown>,
@@ -275,24 +355,32 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   ];
 
   if (tsParser) {
+    // TS + TSX with TypeScript parser — JSX enabled for both
     configBlocks.splice(1, 0, {
       files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
       plugins: { 'ai-guard': plugin } as Record<string, unknown>,
       languageOptions: {
         parser: tsParser,
         parserOptions: {
-          // project: true would be needed for type-aware rules — skip for speed
           ecmaVersion: 'latest',
           sourceType: 'module',
+          ecmaFeatures: { jsx: true },
         },
       },
       rules: rules as Record<string, unknown>,
     });
   } else {
-    // No TS parser — still lint ts files but they may fail to parse
+    // No TS parser — lint ts/tsx files but they may partially fail to parse
     configBlocks.splice(1, 0, {
       files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
       plugins: { 'ai-guard': plugin } as Record<string, unknown>,
+      languageOptions: {
+        parserOptions: {
+          ecmaVersion: 'latest',
+          sourceType: 'module',
+          ecmaFeatures: { jsx: true },
+        },
+      },
       rules: rules as Record<string, unknown>,
     });
   }
@@ -303,76 +391,151 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     overrideConfig: configBlocks,
   });
 
-  // Use relative glob patterns for directory scans, and a direct file pattern for file scans.
+  // ── Lint files ─────────────────────────────────────────────────────────────
+  // Task 7: Use single lintFiles call with all patterns for maximum performance.
+  // This avoids per-pattern ESLint API round-trips which cause massive overhead.
+
   const patterns = isSingleFileTarget
     ? [path.basename(resolvedTargetPath)]
     : JS_TS_FILES;
 
-  // ESLint v9 throws if no files match a pattern — run each glob independently
-  // and collect results, silently skipping 'no files found' errors
-  const perPatternResults = await Promise.all(
-    patterns.map(async (pattern) => {
-      try {
-        return await eslint.lintFiles([pattern]);
-      } catch (err: unknown) {
-        const error = err instanceof Error ? err : new Error(String(err));
+  const lintStart = Date.now();
+  let rawResults: Array<{
+    filePath: string;
+    messages: Array<{
+      ruleId: string | null;
+      severity: number;
+      message: string;
+      line: number;
+      column: number;
+      fatal?: boolean;
+    }>;
+    errorCount: number;
+    warningCount: number;
+  }>;
 
-        if (isSkippablePatternError(error)) {
-          log.debug(`Skipping pattern '${pattern}' (no lintable files)`);
-          return [];
-        }
+  try {
+    // Single call — much faster than Promise.all of individual patterns
+    rawResults = await eslint.lintFiles(patterns) as typeof rawResults;
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error(String(err));
 
-        // Real ESLint runtime/config/parser errors should fail fast.
-        throw error;
-      }
-    }),
-  );
+    if (isSkippablePatternError(error)) {
+      // If single-call fails with "no files", fall back to per-pattern
+      log.debug('Single-call lintFiles failed with no-files, falling back to per-pattern');
+      const perPatternResults = await Promise.all(
+        patterns.map(async (pattern) => {
+          try {
+            return await eslint.lintFiles([pattern]) as typeof rawResults;
+          } catch (patternErr: unknown) {
+            const patternError = patternErr instanceof Error ? patternErr : new Error(String(patternErr));
+            if (isSkippablePatternError(patternError)) {
+              log.debug(`Skipping pattern '${pattern}' (no lintable files)`);
+              return [] as typeof rawResults;
+            }
+            throw patternError;
+          }
+        }),
+      );
+      rawResults = perPatternResults.flat();
+    } else {
+      throw error;
+    }
+  }
+  timing.lintMs = Date.now() - lintStart;
 
-  const rawResults = perPatternResults.flat();
-
-  const durationMs = Date.now() - startMs;
-
-  // ─── Process results ─────────────────────────────────────────────────────
+  // ── Process results ────────────────────────────────────────────────────────
+  const processStart = Date.now();
 
   const files: FileResult[] = [];
+  const ecosystemIssues: EcosystemIssue[] = [];
+  const parserErrors: ParserError[] = [];
   const ruleBreakdown = new Map<string, number>();
   let totalErrors = 0;
   let totalWarnings = 0;
-  // Count all results (including those with no issues) as scanned
   const filesScanned = rawResults.length;
 
   for (const result of rawResults) {
     if (result.messages.length === 0) continue;
 
-    const issues: IssueDetail[] = result.messages.map((m) => ({
-      ruleId: m.ruleId ?? 'unknown',
-      severity: m.severity as 1 | 2,
-      message: m.message,
-      line: m.line,
-      column: m.column,
-    }));
+    const relPath = path.relative(process.cwd(), result.filePath);
+    const aiGuardIssues: IssueDetail[] = [];
+    let fileErrors = 0;
+    let fileWarnings = 0;
 
-    const errorCount = result.errorCount;
-    const warningCount = result.warningCount;
-    totalErrors += errorCount;
-    totalWarnings += warningCount;
+    for (const m of result.messages) {
+      const source = classifyMessage(m);
 
-    for (const issue of issues) {
+      if (source === 'parser-error') {
+        parserErrors.push({
+          filePath: relPath,
+          message: m.message,
+          line: m.line ?? 0,
+        });
+        continue;
+      }
+
+      if (source === 'ecosystem') {
+        ecosystemIssues.push({
+          type: classifyEcosystemType(m),
+          ruleId: m.ruleId,
+          message: m.message,
+          filePath: relPath,
+          line: m.line ?? 0,
+          column: m.column ?? 0,
+        });
+        continue;
+      }
+
+      // source === 'ai-guard'
+      const issue: IssueDetail = {
+        ruleId: m.ruleId ?? 'unknown',
+        severity: m.severity as 1 | 2,
+        message: m.message,
+        line: m.line,
+        column: m.column,
+      };
+
+      aiGuardIssues.push(issue);
+
+      if (m.severity === 2) {
+        fileErrors++;
+        totalErrors++;
+      } else {
+        fileWarnings++;
+        totalWarnings++;
+      }
+
       ruleBreakdown.set(
         issue.ruleId,
         (ruleBreakdown.get(issue.ruleId) ?? 0) + 1,
       );
     }
 
-    const relPath = path.relative(process.cwd(), result.filePath);
-    files.push({ filePath: relPath, issues, errorCount, warningCount });
+    if (aiGuardIssues.length > 0) {
+      files.push({
+        filePath: relPath,
+        issues: aiGuardIssues,
+        errorCount: fileErrors,
+        warningCount: fileWarnings,
+      });
+    }
   }
 
-  // Top files by issue count (top 10)
   const topFiles = [...files]
     .sort((a, b) => b.issues.length - a.issues.length)
     .slice(0, 10)
     .map((f) => ({ path: f.filePath, count: f.issues.length }));
+
+  timing.processMs = Date.now() - processStart;
+
+  if (options.debugTiming) {
+    log.debug(`Plugin load: ${timing.pluginLoadMs}ms`);
+    log.debug(`Parser load: ${timing.parserLoadMs}ms`);
+    log.debug(`Lint: ${timing.lintMs}ms`);
+    log.debug(`Process: ${timing.processMs}ms`);
+    log.debug(`Total: ${Date.now() - overallStart}ms`);
+  }
 
   return {
     files,
@@ -382,6 +545,10 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     filesScanned,
     ruleBreakdown,
     topFiles,
-    durationMs,
+    durationMs: Date.now() - overallStart,
+    timing,
+    ecosystemIssues,
+    parserErrors,
+    tsParserAvailable,
   };
 }

@@ -6,7 +6,7 @@ import security from './configs/security';
 const plugin = {
   meta: {
     name: 'eslint-plugin-ai-guard',
-    version: '1.1.14',
+    version: '1.2.0',
   },
   rules: allRules,
   configs: {

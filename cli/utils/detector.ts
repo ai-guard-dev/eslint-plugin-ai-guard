@@ -181,3 +181,60 @@ export function detect(cwd = process.cwd()): DetectionResult {
     hasNukeIgnore,
   };
 }
+
+// ─── Monorepo detection ────────────────────────────────────────────────────────
+
+export interface MonorepoResult {
+  isMonorepo: boolean;
+  tool: 'pnpm' | 'npm-workspaces' | 'yarn-workspaces' | 'nx' | 'turborepo' | 'lerna' | null;
+  packages: string[];
+}
+
+export function detectMonorepo(cwd = process.cwd()): MonorepoResult {
+  if (fs.existsSync(path.join(cwd, 'pnpm-workspace.yaml'))) {
+    return { isMonorepo: true, tool: 'pnpm', packages: discoverWorkspacePackages(cwd) };
+  }
+  if (fs.existsSync(path.join(cwd, 'nx.json'))) {
+    return { isMonorepo: true, tool: 'nx', packages: discoverWorkspacePackages(cwd) };
+  }
+  if (fs.existsSync(path.join(cwd, 'turbo.json'))) {
+    return { isMonorepo: true, tool: 'turborepo', packages: discoverWorkspacePackages(cwd) };
+  }
+  if (fs.existsSync(path.join(cwd, 'lerna.json'))) {
+    return { isMonorepo: true, tool: 'lerna', packages: discoverWorkspacePackages(cwd) };
+  }
+  try {
+    const pkgPath = path.join(cwd, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as {
+        workspaces?: string[] | { packages?: string[] };
+      };
+      if (pkg.workspaces) {
+        const tool = fs.existsSync(path.join(cwd, 'yarn.lock'))
+          ? ('yarn-workspaces' as const)
+          : ('npm-workspaces' as const);
+        return { isMonorepo: true, tool, packages: discoverWorkspacePackages(cwd) };
+      }
+    }
+  } catch { /* not a monorepo */ }
+  return { isMonorepo: false, tool: null, packages: [] };
+}
+
+function discoverWorkspacePackages(cwd: string): string[] {
+  const commonDirs = ['packages', 'apps', 'libs', 'modules', 'services'];
+  const found: string[] = [];
+  for (const dir of commonDirs) {
+    const dirPath = path.join(cwd, dir);
+    if (!fs.existsSync(dirPath)) continue;
+    try {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (fs.existsSync(path.join(dirPath, entry.name, 'package.json'))) {
+          found.push(path.join(dir, entry.name));
+        }
+      }
+    } catch { /* skip */ }
+  }
+  return found;
+}

@@ -11,6 +11,8 @@ export default [
       'build/**',
       'coverage/**',
       'out/**',
+      // Test fixtures intentionally contain both valid and invalid code patterns
+      'tests/fixtures/**',
     ],
   },
 

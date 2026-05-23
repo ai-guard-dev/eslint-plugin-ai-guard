@@ -28,6 +28,12 @@ export interface ReportData {
     example: { file: string; line: number; column: number; message: string } | null;
   }>;
   categoryBreakdown: Record<string, number>;
+  // Confidence tier breakdown
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  ecosystemCount: number;
+  parserErrorCount: number;
 }
 
 // ─── Rule Metadata ────────────────────────────────────────────────────────────
@@ -152,6 +158,39 @@ export function buildReportData(
     };
   });
 
+  // Confidence tiers for display (computed from rule assignment)
+  const CONFIDENCE_ASSIGNMENT: Record<string, 'high' | 'medium' | 'low'> = {
+    'ai-guard/no-hardcoded-secret': 'high',
+    'ai-guard/no-eval-dynamic': 'high',
+    'ai-guard/no-floating-promise': 'high',
+    'ai-guard/no-empty-catch': 'high',
+    'ai-guard/no-sql-string-concat': 'medium',
+    'ai-guard/no-await-in-loop': 'medium',
+    'ai-guard/require-auth-middleware': 'medium',
+    'ai-guard/require-authz-check': 'medium',
+    'ai-guard/no-catch-log-rethrow': 'medium',
+    'ai-guard/no-catch-without-use': 'medium',
+    'ai-guard/no-unsafe-deserialize': 'medium',
+    'ai-guard/no-async-without-await': 'low',
+    'ai-guard/no-async-array-callback': 'low',
+    'ai-guard/no-dead-branch': 'low',
+    'ai-guard/no-broad-exception': 'low',
+    'ai-guard/no-console-in-handler': 'low',
+    'ai-guard/no-duplicate-logic-block': 'low',
+    'ai-guard/no-redundant-await': 'low',
+  };
+  let highCount = 0;
+  let mediumCount = 0;
+  let lowCount = 0;
+  for (const [rule, count] of result.ruleBreakdown.entries()) {
+    const tier = CONFIDENCE_ASSIGNMENT[rule] ?? 'low';
+    if (tier === 'high') highCount += count;
+    else if (tier === 'medium') mediumCount += count;
+    else lowCount += count;
+  }
+  const ecosystemCount = result.ecosystemIssues?.length ?? 0;
+  const parserErrorCount = result.parserErrors?.length ?? 0;
+
   return {
     projectName,
     version,
@@ -167,6 +206,11 @@ export function buildReportData(
     topFiles,
     topRules,
     categoryBreakdown,
+    highCount,
+    mediumCount,
+    lowCount,
+    ecosystemCount,
+    parserErrorCount,
   };
 }
 
@@ -278,12 +322,23 @@ export function generateHtml(data: ReportData): string {
         <p style="color:#6b7280;font-size:0.85rem;margin-top:0.25rem;">Scanned: <code style="color:#94a3b8;">${escHtml(data.scannedPath)}</code> · Preset: <code style="color:#94a3b8;">${escHtml(data.preset)}</code> · ${data.durationMs}ms</p>
       </div>
       <div style="text-align:center;">
-        <div style="font-size:0.75rem;color:#6b7280;margin-bottom:0.5rem;letter-spacing:0.05em;">AI CODE HEALTH SCORE</div>
-        <div style="width:100px;height:100px;border-radius:50%;background:conic-gradient(${scoreColor} ${data.score}%, #1f2937 0%);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px ${scoreColor}33;">
-          <div style="width:80px;height:80px;border-radius:50%;background:#030712;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-            <span style="font-size:1.6rem;font-weight:800;color:${scoreColor};">${data.score}</span>
-            <span style="font-size:0.65rem;color:${scoreColor};font-weight:600;">${scoreLabel}</span>
+        <div style="font-size:0.75rem;color:#6b7280;margin-bottom:0.75rem;letter-spacing:0.05em;">SIGNAL CONFIDENCE</div>
+        <div style="display:flex;flex-direction:column;gap:0.4rem;">
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+            <span style="font-size:0.8rem;color:#f87171;font-weight:600;">${data.highCount} high-confidence</span>
           </div>
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+            <span style="font-size:0.8rem;color:#fbbf24;font-weight:600;">${data.mediumCount} medium-confidence</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#6b7280;display:inline-block;"></span>
+            <span style="font-size:0.8rem;color:#9ca3af;font-weight:600;">${data.lowCount} suggestions</span>
+          </div>
+          ${data.ecosystemCount > 0 ? `<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
+            <span style="font-size:0.75rem;color:#4b5563;">⚠ ${data.ecosystemCount} config issue${data.ecosystemCount !== 1 ? 's' : ''} (not ai-guard)</span>
+          </div>` : ''}
         </div>
       </div>
     </div>

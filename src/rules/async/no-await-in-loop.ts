@@ -1,5 +1,6 @@
 import { ESLintUtils, AST_NODE_TYPES } from '@typescript-eslint/utils';
 import type { TSESTree, TSESLint } from '@typescript-eslint/utils';
+import path from 'path';
 
 const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
@@ -17,6 +18,8 @@ const SUPPRESSION_REGEX = /ai-guard-disable\s+no-await-in-loop\b/i;
 
 const RETRY_NAME_REGEX = /(retry|retries|attempt|attempts|fallback|tryagain|recovery)/i;
 const SEQUENTIAL_DEPENDENCY_NAME_REGEX = /(previous|prev|last|carry|accumulator|stateful)/i;
+// Simulation, animation, and step-by-step patterns — sequential await is intentional
+const SIMULATION_NAME_REGEX = /(simulat|animat|demo|visuali|step|scene|frame|render|tick|sequence|tutorial|lesson|walk)/i;
 
 const ERROR_CODE_HINTS = [
   'access-denied',
@@ -33,6 +36,17 @@ const CONTROL_AWAIT_HINTS = [
   'ratelimit',
   'backoff',
 ];
+
+// Timer calls inside a loop indicate intentional sequencing (animation/polling)
+const TIMER_FUNCTION_NAMES = new Set([
+  'setinterval',
+  'settimeout',
+  'requestanimationframe',
+  'queuemicrotask',
+  'sleep',
+  'delay',
+  'wait',
+]);
 
 const MUTATION_METHOD_NAMES = new Set([
   'push',
@@ -305,6 +319,11 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
     if (SEQUENTIAL_DEPENDENCY_NAME_REGEX.test(name)) {
       hasSequentialDependency = true;
     }
+
+    // Simulation/animation/step names indicate intentional sequential behavior
+    if (SIMULATION_NAME_REGEX.test(name)) {
+      hasSequentialDependency = true;
+    }
   };
 
   walkNode(
@@ -314,14 +333,17 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
         checkIdentifierName(node.name);
       }
 
-      if (
-        node.type === AST_NODE_TYPES.AwaitExpression &&
+      if (node.type === AST_NODE_TYPES.AwaitExpression &&
         node.argument.type === AST_NODE_TYPES.CallExpression
       ) {
         const calleeName = getCalleeName(node.argument.callee);
         if (calleeName) {
           const lower = calleeName.toLowerCase();
           if (CONTROL_AWAIT_HINTS.some((hint) => lower.includes(hint))) {
+            hasControlAwait = true;
+          }
+          // Awaiting a timer function = intentional sequencing
+          if (TIMER_FUNCTION_NAMES.has(lower)) {
             hasControlAwait = true;
           }
         }
@@ -515,16 +537,62 @@ export const noAwaitInLoop = createRule({
         'Disallow independent `await` usage inside loops, while allowing intentional retry/fallback/sequential workflows. AI tools frequently generate accidental sequential awaits where Promise.all would be safer and faster. Includes a safe autofix for simple independent loops.',
     },
     fixable: 'code',
-    schema: [],
+    schema: [
+      {
+        type: 'object',
+        properties: {
+          allowPatterns: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'File glob patterns to skip (e.g., **/*.test.ts, **/simulation/**)',
+          },
+        },
+        additionalProperties: false,
+      },
+    ],
     messages: {
       awaitInLoop:
-        'Unexpected `await` inside a {{loopType}}. AI tools frequently generate sequential awaits in loops, causing O(n) latency. Consider collecting promises and using `Promise.all()` for parallel execution.',
+        'Sequential `await` inside a {{loopType}} — if these items are independent, consider `Promise.all()` for parallel execution. If sequential order matters, this may be intentional.',
     },
   },
-  defaultOptions: [],
-  create(context) {
+  defaultOptions: [{}],
+  create(context, [options]) {
     if (hasFileSuppression(context.sourceCode)) {
       return {};
+    }
+
+    // File-level suppression: test files and simulation/demo files use sequential await intentionally
+    const filename = context.filename ?? context.getFilename?.() ?? '';
+    const fileBasename = path.basename(filename).toLowerCase();
+    const filePath = filename.toLowerCase();
+
+    const isTestFile =
+      fileBasename.includes('.test.') ||
+      fileBasename.includes('.spec.') ||
+      filePath.includes('/__tests__/') ||
+      filePath.includes('/test/') ||
+      filePath.includes('/tests/');
+
+    const isSimulationFile =
+      SIMULATION_NAME_REGEX.test(fileBasename) ||
+      filePath.includes('/simulation/') ||
+      filePath.includes('/demo/') ||
+      filePath.includes('/animation/') ||
+      filePath.includes('/fixtures/');
+
+    // Suppress entirely for test and simulation files
+    if (isTestFile || isSimulationFile) {
+      return {};
+    }
+
+    // Check user-provided allowPatterns (basic suffix/substring matching)
+    const { allowPatterns = [] } = options as { allowPatterns?: string[] };
+    for (const pattern of allowPatterns) {
+      // Simple pattern: if file path contains the non-glob part
+      const cleaned = pattern.replace(/\*\*/g, '').replace(/\*/g, '').replace(/\//g, path.sep);
+      if (cleaned && filePath.includes(cleaned.toLowerCase())) {
+        return {};
+      }
     }
 
     const loopIntentCache = new WeakMap<LoopNode, IntentAnalysis>();

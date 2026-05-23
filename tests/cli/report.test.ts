@@ -17,6 +17,9 @@ function makeResult(overrides: Partial<RunResult> = {}): RunResult {
     ruleBreakdown: new Map(),
     topFiles: [],
     durationMs: 42,
+    ecosystemIssues: [],
+    parserErrors: [],
+    tsParserAvailable: true,
     ...overrides,
   };
 }
@@ -58,6 +61,10 @@ function makeResultWithIssues(): RunResult {
       { path: 'src/api.ts', count: 2 },
     ],
     durationMs: 87,
+    filesScanned: 2,
+    ecosystemIssues: [],
+    parserErrors: [],
+    tsParserAvailable: true,
   };
 }
 
@@ -157,10 +164,14 @@ describe('generateHtml', () => {
     expect(html).not.toContain('Clean Codebase!');
   });
 
-  it('embeds the score', () => {
+  it('shows confidence tier breakdown instead of numeric score', () => {
     const data = buildReportData(makeResultWithIssues(), 'recommended', '.', process.cwd());
     const html = generateHtml(data);
-    expect(html).toContain(String(data.score));
+    // Should show confidence breakdown, not a raw score number
+    expect(html).toContain('SIGNAL CONFIDENCE');
+    expect(html).toContain('high-confidence');
+    expect(html).toContain('medium-confidence');
+    expect(html).toContain('suggestions');
   });
 
   it('is self-contained (no external font/image dependencies)', () => {

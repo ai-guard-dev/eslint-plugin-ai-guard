@@ -78,8 +78,45 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
         };
       `,
     },
+    // HTTP method exports (Next.js route handlers) — always valid async
+    {
+      code: `export async function GET() { return Response.json({ ok: true }); }`,
+    },
+    {
+      code: `export async function POST(request) { return Response.json({}); }`,
+    },
+    {
+      code: `export const PUT = async (req, res) => { res.send('ok'); };`,
+    },
+    {
+      code: `export async function DELETE() { return new Response(null, { status: 204 }); }`,
+    },
+    {
+      code: `export async function OPTIONS() { return new Response(null); }`,
+    },
+    // Middleware naming convention — always valid
+    {
+      code: `async function useAuth(req, res, next) { next(); }`,
+    },
+    {
+      code: `const middleware = async (req, res, next) => { next(); };`,
+    },
+    // allowedFunctionNames option
+    {
+      code: `async function myCustomHandler() { doSomething(); }`,
+      options: [{ allowedFunctionNames: ['myCustomHandler'] }],
+    },
   ],
   invalid: [
+    // Pass-through wrappers — produce asyncPassThrough (informational), not asyncWithoutAwait
+    {
+      code: `async function wrap() { return fetchData(); }`,
+      errors: [{ messageId: 'asyncPassThrough' }],
+    },
+    {
+      code: `const wrap = async () => fetchData();`,
+      errors: [{ messageId: 'asyncPassThrough' }],
+    },
     {
       code: `
         async function run() {
@@ -108,12 +145,8 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
           return doWork();
         };
       `,
-      output: `
-        const run = async () => {
-          return await (doWork());
-        };
-      `,
-      errors: [{ messageId: 'asyncWithoutAwait' }],
+      // Pass-through wrapper — produces asyncPassThrough, not asyncWithoutAwait
+      errors: [{ messageId: 'asyncPassThrough' }],
     },
     {
       code: `
@@ -146,14 +179,8 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
           }
         }
       `,
-      output: `
-        class S {
-          async run() {
-            return await (this.load());
-          }
-        }
-      `,
-      errors: [{ messageId: 'asyncWithoutAwait' }],
+      // Single return of call expression = pass-through
+      errors: [{ messageId: 'asyncPassThrough' }],
     },
     {
       code: `
