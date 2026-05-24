@@ -9,6 +9,9 @@
  */
 
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
+import { ISSUE_CONFIDENCE, ISSUE_CATEGORY, ISSUE_ASYNC_RISK_TYPE, ISSUE_REMEDIATION } from './eslint-runner.js';
+import { CONFIDENCE_TIER } from './logger.js';
+import type { ConfidenceTier } from './logger.js';
 
 // ─── SARIF type definitions ────────────────────────────────────────────────────
 
@@ -38,16 +41,29 @@ interface SarifReportingDescriptor {
   id: string;
   shortDescription: { text: string };
   fullDescription?: { text: string };
+  help?: { text: string; markdown?: string };
   helpUri?: string;
   defaultConfiguration?: { level: 'error' | 'warning' | 'note' | 'none' };
-  properties?: { tags?: string[] };
+  properties?: {
+    tags?: string[];
+    confidence?: string;
+    category?: string;
+    'problem.severity'?: string;
+  };
 }
 
 interface SarifResult {
   ruleId: string;
   level: 'error' | 'warning' | 'note' | 'none';
+  kind?: 'fail' | 'open' | 'informational';
+  rank?: number;  // 0-100 confidence rank for GitHub UI ordering
   message: { text: string };
   locations: SarifLocation[];
+  properties?: {
+    confidence?: string;
+    asyncRiskType?: string;
+    category?: string;
+  };
 }
 
 interface SarifTool {
@@ -75,29 +91,59 @@ interface SarifLog {
 // ─── Rule metadata ────────────────────────────────────────────────────────────
 
 const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
-  'ai-guard/no-empty-catch':        { shortDesc: 'Empty catch block silently swallows errors', tags: ['reliability'] },
-  'ai-guard/no-broad-exception':    { shortDesc: 'Catching broad Exception/Error masks specific failures', tags: ['reliability'] },
-  'ai-guard/no-catch-log-rethrow':  { shortDesc: 'Catch block logs and rethrows — use one or the other', tags: ['reliability'] },
-  'ai-guard/no-catch-without-use':  { shortDesc: 'Caught error variable is not used', tags: ['reliability'] },
-  'ai-guard/no-floating-promise':   { shortDesc: 'Promise is not awaited or error-handled', tags: ['async', 'reliability'] },
-  'ai-guard/no-await-in-loop':      { shortDesc: 'Sequential await in loop — consider Promise.all', tags: ['async', 'performance'] },
-  'ai-guard/no-async-without-await': { shortDesc: 'Async function contains no await expressions', tags: ['async'] },
-  'ai-guard/no-async-array-callback': { shortDesc: 'Async callback in array method may not behave as expected', tags: ['async'] },
-  'ai-guard/no-redundant-await':    { shortDesc: 'Redundant await on already-resolved value', tags: ['async'] },
-  'ai-guard/no-hardcoded-secret':   { shortDesc: 'Hardcoded secret or credential detected', tags: ['security', 'secrets'] },
-  'ai-guard/no-eval-dynamic':       { shortDesc: 'Dynamic eval or Function constructor is dangerous', tags: ['security'] },
-  'ai-guard/no-sql-string-concat':  { shortDesc: 'SQL query built via string concatenation — SQL injection risk', tags: ['security', 'injection'] },
-  'ai-guard/no-unsafe-deserialize': { shortDesc: 'Unsafe deserialization of untrusted data', tags: ['security'] },
+  'ai-guard/no-empty-catch':          { shortDesc: 'Empty catch block silently swallows errors', tags: ['reliability'] },
+  'ai-guard/no-broad-exception':      { shortDesc: 'Catching broad Exception/Error masks specific failures', tags: ['reliability'] },
+  'ai-guard/no-catch-log-rethrow':    { shortDesc: 'Catch block logs and rethrows — use one or the other', tags: ['reliability'] },
+  'ai-guard/no-catch-without-use':    { shortDesc: 'Caught error variable is not used', tags: ['reliability'] },
+  'ai-guard/no-floating-promise':     { shortDesc: 'Promise not awaited or error-handled — async failures will be silently swallowed', tags: ['async', 'async-reliability'] },
+  'ai-guard/no-await-in-loop':        { shortDesc: 'Sequential await in loop — consider Promise.all for parallel execution', tags: ['async', 'async-reliability', 'performance'] },
+  'ai-guard/no-async-without-await':  { shortDesc: 'Async function contains no await expressions', tags: ['async', 'async-reliability'] },
+  'ai-guard/no-async-array-callback': { shortDesc: 'Async callback in array method may not behave as expected', tags: ['async', 'async-reliability'] },
+  'ai-guard/no-redundant-await':      { shortDesc: 'Redundant await on already-resolved value', tags: ['async'] },
+  'ai-guard/no-hardcoded-secret':     { shortDesc: 'Hardcoded secret or credential detected', tags: ['security', 'secrets'] },
+  'ai-guard/no-eval-dynamic':         { shortDesc: 'Dynamic eval or Function constructor is dangerous', tags: ['security'] },
+  'ai-guard/no-sql-string-concat':    { shortDesc: 'SQL query built via string concatenation — SQL injection risk', tags: ['security', 'injection'] },
+  'ai-guard/no-unsafe-deserialize':   { shortDesc: 'Unsafe deserialization of untrusted data', tags: ['security'] },
   'ai-guard/require-auth-middleware': { shortDesc: 'Route handler appears to lack authentication middleware', tags: ['security', 'auth'] },
-  'ai-guard/require-authz-check':   { shortDesc: 'Handler lacks authorization check', tags: ['security', 'auth'] },
-  'ai-guard/no-console-in-handler': { shortDesc: 'console.log in request handler — use structured logging', tags: ['ai-patterns'] },
-  'ai-guard/no-duplicate-logic-block': { shortDesc: 'Duplicate logic block detected', tags: ['ai-patterns'] },
-  'ai-guard/no-dead-branch':        { shortDesc: 'Dead code branch that can never execute', tags: ['ai-patterns'] },
+  'ai-guard/require-authz-check':     { shortDesc: 'Handler lacks authorization check', tags: ['security', 'auth'] },
+  'ai-guard/no-console-in-handler':   { shortDesc: 'console.log in request handler — use structured logging', tags: ['ai-patterns'] },
+  'ai-guard/no-duplicate-logic-block':{ shortDesc: 'Duplicate logic block detected', tags: ['ai-patterns'] },
+  'ai-guard/no-dead-branch':          { shortDesc: 'Dead code branch that can never execute', tags: ['ai-patterns'] },
 };
 
 const BASE_DOCS_URL = 'https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/docs/rules';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Confidence → SARIF mapping ──────────────────────────────────────────────
+
+function confidenceToSarifLevel(confidence: string | undefined): 'error' | 'warning' | 'note' | 'none' {
+  switch (confidence) {
+    case 'high':          return 'error';
+    case 'medium':        return 'warning';
+    case 'low':           return 'warning';
+    case 'informational': return 'note';
+    default:              return 'warning';
+  }
+}
+
+function confidenceToRank(confidence: string | undefined): number {
+  switch (confidence) {
+    case 'high':          return 90;
+    case 'medium':        return 60;
+    case 'low':           return 30;
+    case 'informational': return 10;
+    default:              return 30;
+  }
+}
+
+function confidenceToGitHubSeverity(confidence: string | undefined): string {
+  switch (confidence) {
+    case 'high':          return 'high';
+    case 'medium':        return 'medium';
+    case 'low':           return 'low';
+    case 'informational': return 'recommendation';
+    default:              return 'low';
+  }
+}
 
 function severityToSarifLevel(severity: 1 | 2): 'error' | 'warning' {
   return severity === 2 ? 'error' : 'warning';
@@ -123,6 +169,18 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
   return ruleIds.map((id) => {
     const meta = RULE_DOCS[id];
     const shortName = id.replace('ai-guard/', '');
+    const confidence = ISSUE_CONFIDENCE[id];
+    const category = ISSUE_CATEGORY[id] ?? 'AI Patterns';
+    const remediation = ISSUE_REMEDIATION[id];
+
+    const helpMarkdown = [
+      `**${meta?.shortDesc ?? shortName}**`,
+      '',
+      remediation ? `**Fix:** ${remediation}` : '',
+      '',
+      `[View rule documentation](${BASE_DOCS_URL}/${shortName}.md)`,
+    ].filter(Boolean).join('\n');
+
     return {
       id,
       shortDescription: {
@@ -131,21 +189,34 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
       fullDescription: {
         text: meta?.shortDesc ?? `ai-guard rule: ${shortName}`,
       },
+      help: {
+        text: remediation ?? meta?.shortDesc ?? shortName,
+        markdown: helpMarkdown,
+      },
       helpUri: `${BASE_DOCS_URL}/${shortName}.md`,
       defaultConfiguration: {
-        level: 'warning' as const,
+        level: confidenceToSarifLevel(confidence),
       },
       properties: {
-        tags: meta?.tags ?? ['ai-guard'],
+        tags: [...(meta?.tags ?? ['ai-guard']), category.toLowerCase().replace(/ /g, '-')],
+        confidence: confidence ?? 'low',
+        category,
+        'problem.severity': confidenceToGitHubSeverity(confidence),
       },
     };
   });
 }
 
 function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
+  const confidence = ISSUE_CONFIDENCE[issue.ruleId];
+  const asyncRiskType = ISSUE_ASYNC_RISK_TYPE[issue.ruleId];
+  const category = ISSUE_CATEGORY[issue.ruleId];
+
   return {
     ruleId: issue.ruleId,
-    level: severityToSarifLevel(issue.severity),
+    level: confidenceToSarifLevel(confidence),
+    kind: confidence === 'informational' ? 'informational' : 'fail',
+    rank: confidenceToRank(confidence),
     message: { text: issue.message },
     locations: [
       {
@@ -164,6 +235,11 @@ function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
         message: { text: issue.message },
       },
     ],
+    properties: {
+      confidence: confidence ?? 'low',
+      ...(asyncRiskType && { asyncRiskType }),
+      ...(category && { category }),
+    },
   };
 }
 

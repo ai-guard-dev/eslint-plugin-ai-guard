@@ -1,67 +1,61 @@
-# GitHub Code Scanning with AI Guard
+# AI Guard — GitHub Code Scanning (Minimal Setup)
 #
-# This workflow runs ai-guard and uploads results to GitHub Code Scanning.
-# Results appear as PR annotations and in the Security > Code Scanning tab.
+# Drop this into .github/workflows/ai-guard.yml for automatic PR annotations.
+# Findings appear in the Security > Code Scanning tab and as inline PR comments.
 #
-# Prerequisites:
-#   1. npm install --save-dev eslint-plugin-ai-guard
-#   2. Copy this file to .github/workflows/ai-guard-code-scanning.yml
-#
-# Required permission: security-events: write
-# (already included below)
+# Requirements:
+#   - Actions: write (for step summaries)
+#   - Security-events: write (for SARIF upload)
+#   - Contents: read
 
-name: AI Guard Code Scanning
+name: AI Guard
 
 on:
   push:
     branches: [main, master, develop]
   pull_request:
     branches: [main, master, develop]
-  schedule:
-    # Weekly baseline scan — Sunday at midnight UTC
-    - cron: '0 0 * * 0'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: write
 
 jobs:
-  ai-guard-scan:
-    name: AI Guard
+  ai-guard:
+    name: Async Reliability
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write   # Required to upload SARIF to Code Scanning
-      actions: read
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history required for changed-file detection
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      # Option A: Scan using the CLI (recommended — zero ESLint config needed)
-      - name: Run AI Guard (SARIF output)
+      - name: Run AI Guard
+        id: ai-guard
         run: |
-          npx ai-guard run --path src --sarif > ai-guard-results.sarif
-        continue-on-error: true   # Don't fail the workflow on findings — upload first
-
-      # Option B: If you want to fail the build on errors, use this instead:
-      # - name: Run AI Guard (SARIF output)
-      #   run: npx ai-guard run --path src --sarif > ai-guard-results.sarif
+          # Scan only changed files on PRs, full scan on push
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npx ai-guard changed --pr --fail-on high --sarif --sarif-output ai-guard-results.sarif
+          else
+            npx ai-guard run --fail-on high --sarif > ai-guard-results.sarif
+          fi
+        continue-on-error: true
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        if: always()    # Upload even if the scan found issues
+        if: always()
         with:
           sarif_file: ai-guard-results.sarif
           category: ai-guard
-
-      # Optional: Also output a human-readable summary for the Actions log
-      - name: AI Guard summary
-        if: always()
-        run: npx ai-guard run --path src --quiet
-        continue-on-error: true

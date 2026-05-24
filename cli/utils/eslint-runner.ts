@@ -13,10 +13,14 @@ export type Preset = 'recommended' | 'strict' | 'security';
 export interface RunOptions {
   preset: Preset;
   targetPath: string;
+  /** Explicit list of absolute file paths — bypasses glob traversal (used for changed-file mode) */
+  files?: string[];
   maxWarnings?: number;
   jsonOutput?: boolean;
   debugTiming?: boolean;
   sarif?: boolean;
+  /** Working directory override (monorepo subdirectory support) */
+  workingDirectory?: string;
 }
 
 export interface IssueDetail {
@@ -27,6 +31,14 @@ export interface IssueDetail {
   column: number;
   endLine?: number;
   endColumn?: number;
+  /** Confidence tier from CONFIDENCE_TIER — included in JSON output */
+  confidence?: 'high' | 'medium' | 'low' | 'informational';
+  /** High-level category (Async Stability, Security, etc.) */
+  category?: string;
+  /** Async risk type for async-reliability rules */
+  asyncRiskType?: string;
+  /** Short remediation guidance */
+  remediation?: string;
 }
 
 export interface FileResult {
@@ -96,6 +108,81 @@ export interface RunResult {
 //
 // Cache key: `${cwd}::${preset}` — invalidated on CWD or preset change.
 // This is safe because a single CLI invocation uses one CWD and one preset.
+
+// ─── Issue metadata ───────────────────────────────────────────────────────────
+// Lookup tables for enriching IssueDetail with confidence, category,
+// asyncRiskType, and remediation. Used in JSON output and SARIF results.
+
+export const ISSUE_CONFIDENCE: Record<string, 'high' | 'medium' | 'low' | 'informational'> = {
+  'ai-guard/no-hardcoded-secret':    'high',
+  'ai-guard/no-eval-dynamic':        'high',
+  'ai-guard/no-floating-promise':    'high',
+  'ai-guard/no-empty-catch':         'high',
+  'ai-guard/no-sql-string-concat':   'medium',
+  'ai-guard/no-await-in-loop':       'medium',
+  'ai-guard/require-auth-middleware':'medium',
+  'ai-guard/require-authz-check':    'medium',
+  'ai-guard/no-catch-log-rethrow':   'medium',
+  'ai-guard/no-catch-without-use':   'medium',
+  'ai-guard/no-unsafe-deserialize':  'medium',
+  'ai-guard/no-async-array-callback':'low',
+  'ai-guard/no-dead-branch':         'low',
+  'ai-guard/no-broad-exception':     'low',
+  'ai-guard/no-console-in-handler':  'low',
+  'ai-guard/no-duplicate-logic-block':'low',
+  'ai-guard/no-async-without-await': 'informational',
+  'ai-guard/no-redundant-await':     'informational',
+};
+
+export const ISSUE_CATEGORY: Record<string, string> = {
+  'ai-guard/no-floating-promise':    'Async Reliability',
+  'ai-guard/no-await-in-loop':       'Async Reliability',
+  'ai-guard/no-async-without-await': 'Async Reliability',
+  'ai-guard/no-async-array-callback':'Async Reliability',
+  'ai-guard/no-redundant-await':     'Async Reliability',
+  'ai-guard/no-empty-catch':         'Reliability',
+  'ai-guard/no-broad-exception':     'Reliability',
+  'ai-guard/no-catch-log-rethrow':   'Reliability',
+  'ai-guard/no-catch-without-use':   'Reliability',
+  'ai-guard/no-hardcoded-secret':    'Security',
+  'ai-guard/no-eval-dynamic':        'Security',
+  'ai-guard/no-sql-string-concat':   'Security',
+  'ai-guard/no-unsafe-deserialize':  'Security',
+  'ai-guard/require-auth-middleware':'Security',
+  'ai-guard/require-authz-check':    'Security',
+  'ai-guard/no-console-in-handler':  'AI Patterns',
+  'ai-guard/no-duplicate-logic-block':'AI Patterns',
+  'ai-guard/no-dead-branch':         'AI Patterns',
+};
+
+export const ISSUE_ASYNC_RISK_TYPE: Record<string, string> = {
+  'ai-guard/no-floating-promise':    'floating-promise',
+  'ai-guard/no-await-in-loop':       'sequential-await',
+  'ai-guard/no-async-without-await': 'unnecessary-async',
+  'ai-guard/no-async-array-callback':'async-array-callback',
+  'ai-guard/no-redundant-await':     'redundant-await',
+};
+
+export const ISSUE_REMEDIATION: Record<string, string> = {
+  'ai-guard/no-floating-promise':    'Add `await` before the call, assign to a variable, or add `.catch()` to handle rejection.',
+  'ai-guard/no-await-in-loop':       'Collect promises in an array and use `await Promise.all(...)` outside the loop.',
+  'ai-guard/no-async-without-await': 'Remove `async` if no async operations are needed, or add an `await` expression.',
+  'ai-guard/no-async-array-callback':'Use `Promise.all(array.map(async item => ...))` to ensure all async callbacks are awaited.',
+  'ai-guard/no-redundant-await':     'Remove the `await` \u2014 the value is already resolved.',
+  'ai-guard/no-empty-catch':         'Add error handling in the catch block, or at minimum log the error.',
+  'ai-guard/no-broad-exception':     'Catch specific error types or re-throw after handling.',
+  'ai-guard/no-catch-log-rethrow':   'Either log the error OR rethrow it \u2014 doing both duplicates the error in logs.',
+  'ai-guard/no-catch-without-use':   'Use the caught error variable or rename to `_` to signal intentional suppression.',
+  'ai-guard/no-hardcoded-secret':    'Move credentials to environment variables: `process.env.SECRET_KEY`.',
+  'ai-guard/no-eval-dynamic':        'Avoid eval and Function constructors. Use safer alternatives like JSON.parse.',
+  'ai-guard/no-sql-string-concat':   'Use parameterized queries or an ORM to prevent SQL injection.',
+  'ai-guard/no-unsafe-deserialize':  'Validate input with a schema library (zod, joi, yup) before parsing.',
+  'ai-guard/require-auth-middleware':'Add an authentication middleware before the route handler.',
+  'ai-guard/require-authz-check':    'Verify the requesting user has permission to access this resource.',
+  'ai-guard/no-console-in-handler':  'Replace console.log with a structured logger (pino, winston, etc.).',
+  'ai-guard/no-duplicate-logic-block':'Extract the duplicated logic into a shared function.',
+  'ai-guard/no-dead-branch':         'Remove the unreachable branch or fix the condition.',
+};
 
 interface CachedRunner {
   eslint: unknown; // ESLint instance — typed as unknown to avoid importing ESLint at module level
@@ -506,7 +593,18 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   // than Promise.all of individual pattern calls. ESLint can batch file resolution
   // and share parser instances across files when called once.
 
-  const patterns = isSingleFileTarget
+  // ── Determine lint target ──────────────────────────────────────────────────
+  //
+  // Two modes:
+  //  1. Explicit file list (changed-file mode): pass absolute paths directly
+  //     to lintFiles() — bypasses glob traversal entirely. This is the fastest
+  //     path and enables changed-file PR scanning.
+  //  2. Pattern-based (full scan): use JS_TS_FILE_PATTERNS with cwd.
+
+  const hasExplicitFiles = options.files && options.files.length > 0;
+  const patterns = hasExplicitFiles
+    ? options.files!  // absolute paths — ESLint accepts them directly
+    : isSingleFileTarget
     ? [path.basename(resolvedTargetPath)]
     : JS_TS_FILE_PATTERNS;
 
@@ -609,14 +707,19 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
       }
 
       // source === 'ai-guard'
+      const ruleId = m.ruleId ?? 'unknown';
       const issue: IssueDetail = {
-        ruleId: m.ruleId ?? 'unknown',
+        ruleId,
         severity: m.severity as 1 | 2,
         message: m.message,
         line: m.line,
         column: m.column,
         endLine: m.endLine,
         endColumn: m.endColumn,
+        confidence: ISSUE_CONFIDENCE[ruleId],
+        category: ISSUE_CATEGORY[ruleId],
+        asyncRiskType: ISSUE_ASYNC_RISK_TYPE[ruleId],
+        remediation: ISSUE_REMEDIATION[ruleId],
       };
 
       aiGuardIssues.push(issue);

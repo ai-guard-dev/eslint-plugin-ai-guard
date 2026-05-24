@@ -1,0 +1,93 @@
+name: 'AI Guard'
+description: 'Reliability guardrails for AI-generated code — catch async bugs, floating promises, and AI-specific mistakes in Pull Requests'
+author: 'Yash Jadhav'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+# ─── Inputs ───────────────────────────────────────────────────────────────────
+
+inputs:
+  preset:
+    description: 'Rule preset to use: recommended | strict | security'
+    default: 'recommended'
+    required: false
+
+  fail-on:
+    description: 'When to fail CI: high | medium | any | none (default: high-confidence issues only)'
+    default: 'high'
+    required: false
+
+  changed-only:
+    description: 'Scan only files changed in this PR (recommended for CI speed)'
+    default: 'true'
+    required: false
+
+  path:
+    description: 'Directory or file to scan'
+    default: '.'
+    required: false
+
+  upload-sarif:
+    description: 'Upload SARIF results to GitHub Code Scanning'
+    default: 'true'
+    required: false
+
+  github-summary:
+    description: 'Write a step summary to the GitHub Actions job summary'
+    default: 'true'
+    required: false
+
+  working-directory:
+    description: 'Working directory for the action (useful for monorepos)'
+    default: '.'
+    required: false
+
+  package-manager:
+    description: 'Package manager to use: auto | npm | pnpm | yarn'
+    default: 'auto'
+    required: false
+
+  sarif-output:
+    description: 'Path to write the SARIF results file'
+    default: 'ai-guard-results.sarif'
+    required: false
+
+  install-deps:
+    description: 'Install project dependencies before scanning'
+    default: 'true'
+    required: false
+
+# ─── Outputs ──────────────────────────────────────────────────────────────────
+
+outputs:
+  issues-found:
+    description: 'Total number of issues found'
+    value: ${{ steps.run-ai-guard.outputs.issues-found }}
+
+  high-confidence-count:
+    description: 'Number of high-confidence issues found'
+    value: ${{ steps.run-ai-guard.outputs.high-confidence-count }}
+
+  medium-confidence-count:
+    description: 'Number of medium-confidence issues found'
+    value: ${{ steps.run-ai-guard.outputs.medium-confidence-count }}
+
+  files-scanned:
+    description: 'Number of files scanned'
+    value: ${{ steps.run-ai-guard.outputs.files-scanned }}
+
+  sarif-file:
+    description: 'Path to the generated SARIF file'
+    value: ${{ steps.run-ai-guard.outputs.sarif-file }}
+
+  duration-ms:
+    description: 'Scan duration in milliseconds'
+    value: ${{ steps.run-ai-guard.outputs.duration-ms }}
+
+# ─── Implementation ───────────────────────────────────────────────────────────
+
+runs:
+  using: 'node20'
+  main: 'action/entrypoint.js'

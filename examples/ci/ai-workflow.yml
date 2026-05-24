@@ -1,0 +1,97 @@
+# AI Guard — AI Coding Workflow (Cursor / Claude Code / Copilot)
+#
+# Designed for teams using AI coding assistants like Cursor, Claude Code,
+# or GitHub Copilot to validate AI-generated PR code before merge.
+#
+# This workflow:
+# - Runs on every PR with a clear "AI Code Review" label
+# - Catches async reliability issues most common in AI-generated code
+# - Posts PR annotations inline on the changed code
+# - Writes a clear step summary for the PR author
+#
+# Most common AI-generated async mistakes caught:
+# - Floating promises (no await, no .catch)
+# - Sequential await in loops (use Promise.all instead)
+# - Empty or over-broad catch blocks
+# - Async functions without any await expression
+
+name: AI Guard — AI Code Validation
+
+on:
+  pull_request:
+    branches: [main, develop, master]
+    # Trigger on any label or code change — catches both AI and human PRs
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  security-events: write
+  actions: write
+  pull-requests: read
+
+jobs:
+  validate-ai-code:
+    name: Validate AI-generated code
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Changed-file scan: only validate what this PR touched
+      # Informational hints (e.g., no-async-without-await common in AI code)
+      # are automatically collapsed — only real issues fail the build
+      - name: AI Guard — Validate changed code
+        id: ai-guard
+        run: |
+          npx ai-guard changed \
+            --pr \
+            --fail-on high \
+            --sarif \
+            --sarif-output ai-guard-results.sarif \
+            --verbose
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+          GITHUB_OUTPUT: ${{ github.output }}
+          FORCE_COLOR: 1
+        continue-on-error: true
+
+      # PR annotations appear inline on the changed code
+      - name: Upload findings to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ai-guard-results.sarif
+          category: ai-guard
+
+      # Fail the build only on high-confidence issues
+      - name: Check results
+        if: steps.ai-guard.outcome == 'failure'
+        run: |
+          echo "::error::AI Guard found high-confidence reliability issues in this PR."
+          echo "Review the annotations in the Files changed tab and the AI Guard step summary."
+          exit 1
+
+# ─── Cursor / Claude Code Integration Guide ───────────────────────────────────
+#
+# For local pre-commit validation (Cursor / Claude Code):
+#
+# Add to .cursorrules or CLAUDE.md:
+#   After writing any async TypeScript/JavaScript:
+#   Run: npx ai-guard changed --staged
+#   Fix any high or medium confidence findings before committing.
+#
+# Or use the git hook approach:
+#   npx ai-guard init  # creates .husky/pre-commit with ai-guard changed --staged

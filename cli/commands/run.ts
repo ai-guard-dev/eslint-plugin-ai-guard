@@ -4,6 +4,8 @@ import chalk from 'chalk';
 import { runEslint, type Preset, type EcosystemIssue } from '../utils/eslint-runner.js';
 import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, CONFIDENCE_TIER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
 import { buildSarifLog, sarifToJson } from '../utils/sarif.js';
+import { emitGitHubAnnotations, writeGitHubSummary, writeGitHubOutputs } from '../utils/github-summary.js';
+import { isGitHubActions } from '../utils/git-diff.js';
 import type { RunResult } from '../utils/eslint-runner.js';
 
 export function registerRunCommand(program: Command): void {
@@ -15,6 +17,7 @@ export function registerRunCommand(program: Command): void {
     .option('--security', 'Use the security-only rule preset')
     .option('--json', 'Output results as JSON (CI-friendly)')
     .option('--sarif', 'Output results as SARIF 2.1.0 (for GitHub Code Scanning)')
+    .option('--fail-on <level>', 'Fail CI on: errors (default) | high | medium | any | none', 'errors')
     .option(
       '--max-warnings <n>',
       'Fail with exit code 1 if warnings exceed this count',
@@ -29,6 +32,7 @@ export function registerRunCommand(program: Command): void {
       security?: boolean;
       json?: boolean;
       sarif?: boolean;
+      failOn: string;
       maxWarnings?: number;
       verbose?: boolean;
       quiet?: boolean;
@@ -96,12 +100,21 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
+      // ─── GitHub Actions integration ────────────────────────────────────────────────
+
+      // Auto-enable in GitHub Actions: annotations + step summary
+      if (isGitHubActions()) {
+        emitGitHubAnnotations(result);
+        writeGitHubSummary(result, { preset, scanMode: 'full' });
+        writeGitHubOutputs(result);
+      }
+
       // ─── SARIF mode ─────────────────────────────────────────────────────────────────
 
       if (opts.sarif) {
         const sarifLog = buildSarifLog(result);
         console.log(sarifToJson(sarifLog));
-        process.exit(getRunExitCode(result, opts.maxWarnings));
+        process.exit(resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
         return;
       }
 
@@ -127,7 +140,7 @@ export function registerRunCommand(program: Command): void {
           tsParserAvailable: result.tsParserAvailable,
         };
         console.log(JSON.stringify(jsonOutput, null, 2));
-        process.exit(getRunExitCode(result, opts.maxWarnings));
+        process.exit(resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
         return;
       }
 
@@ -361,7 +374,7 @@ export function registerRunCommand(program: Command): void {
 const GROUP_THRESHOLD = 4; // Group if same rule appears >= this many times in a file
 
 /** Partition files into actionable and informational based on confidence tier */
-function partitionByTier(
+export function partitionByTier(
   result: RunResult,
   quiet: boolean,
 ): { actionableFiles: RunResult['files']; informationalFiles: RunResult['files'] } {
@@ -391,7 +404,7 @@ function partitionByTier(
 }
 
 /** Build signal summary for JSON output — replaces misleading numeric score */
-function buildSignalSummary(result: RunResult): {
+export function buildSignalSummary(result: RunResult): {
   high: number; medium: number; low: number; informational: number;
   ecosystemIssues: number; parserErrors: number;
 } {
@@ -425,7 +438,7 @@ function hasGroupedWarnings(result: RunResult): boolean {
   return false;
 }
 
-function renderIssuesByFile(result: RunResult, verbose: boolean, quiet = false): void {
+export function renderIssuesByFile(result: RunResult, verbose: boolean, quiet = false): void {
   for (const file of result.files) {
     log.print(
       `  ${chalk.bold.white(file.filePath)} ` +
@@ -495,9 +508,49 @@ export function getRunExitCode(result: RunResult, maxWarnings?: number): number 
   return 0;
 }
 
-function formatIssueCount(errors: number, warnings: number): string {
+export function formatIssueCount(errors: number, warnings: number): string {
   const parts: string[] = [];
   if (errors > 0) parts.push(chalk.red.bold(`${errors} error${errors !== 1 ? 's' : ''}`));
   if (warnings > 0) parts.push(chalk.yellow.bold(`${warnings} warning${warnings !== 1 ? 's' : ''}`));
   return parts.join(chalk.gray(' · '));
+}
+
+// ─── Fail-on exit code resolution ───────────────────────────────────────────────────
+
+/**
+ * Determine exit code based on --fail-on level.
+ *
+ * - errors (default): exit 1 if any errors (severity 2) exist
+ * - high:   exit 1 only if high-confidence findings exist
+ * - medium: exit 1 if high OR medium findings exist
+ * - any:    exit 1 if any findings (excluding informational)
+ * - none:   always exit 0 (report-only mode)
+ */
+export function resolveExitCode(
+  result: RunResult,
+  failOn: string,
+  maxWarnings?: number,
+): number {
+  if (maxWarnings !== undefined && result.totalWarnings > maxWarnings) return 1;
+
+  switch (failOn) {
+    case 'none':   return 0;
+    case 'errors': return result.totalErrors > 0 ? 1 : 0;
+    case 'high': {
+      const high = result.files.flatMap((f) => f.issues)
+        .filter((i) => CONFIDENCE_TIER[i.ruleId] === 'high').length;
+      return high > 0 ? 1 : 0;
+    }
+    case 'medium': {
+      const highMed = result.files.flatMap((f) => f.issues)
+        .filter((i) => CONFIDENCE_TIER[i.ruleId] === 'high' || CONFIDENCE_TIER[i.ruleId] === 'medium').length;
+      return highMed > 0 ? 1 : 0;
+    }
+    case 'any': {
+      const actionable = result.files.flatMap((f) => f.issues)
+        .filter((i) => CONFIDENCE_TIER[i.ruleId] !== 'informational').length;
+      return actionable > 0 ? 1 : 0;
+    }
+    default: return getRunExitCode(result, maxWarnings);
+  }
 }

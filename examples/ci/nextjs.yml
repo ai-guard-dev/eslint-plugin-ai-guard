@@ -1,0 +1,70 @@
+# AI Guard — Next.js Project Workflow
+#
+# Optimized for Next.js monorepos with:
+# - App Router and Pages Router support
+# - Changed-file scanning (fast on PRs)
+# - SARIF upload for Code Scanning annotations
+# - Step summary in GitHub UI
+
+name: AI Guard — Next.js
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'app/**'
+      - 'pages/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'src/**'
+      - '*.ts'
+      - '*.tsx'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: write
+
+jobs:
+  ai-guard:
+    name: Async Reliability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: AI Guard — Changed files scan
+        id: scan
+        run: |
+          npx ai-guard changed \
+            --pr \
+            --fail-on high \
+            --sarif \
+            --sarif-output ai-guard-results.sarif
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+          GITHUB_OUTPUT: ${{ github.output }}
+        continue-on-error: true
+
+      - name: Upload to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ai-guard-results.sarif
+          category: ai-guard-nextjs
+
+      # Summary is auto-written when GITHUB_STEP_SUMMARY is set
+      # Informational hints (no-async-without-await on Next.js server components)
+      # are automatically collapsed and excluded from the failure threshold

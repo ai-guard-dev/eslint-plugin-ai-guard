@@ -1,0 +1,349 @@
+/**
+ * changed.ts — ai-guard changed command.
+ *
+ * Scans only the files that have changed in a PR or working tree,
+ * instead of the full project. This is the primary CI/CD scan mode.
+ *
+ * Usage:
+ *   ai-guard changed                  # Uncommitted changes + staged
+ *   ai-guard changed --pr             # PR diff vs base branch (auto-detects GITHUB_BASE_REF)
+ *   ai-guard changed --staged         # Staged files only
+ *   ai-guard changed --base main      # Diff vs specific branch
+ *   ai-guard changed --path packages/web  # Filter to subdirectory (monorepo)
+ */
+
+import type { Command } from 'commander';
+import path from 'path';
+import fs from 'fs';
+import ora from 'ora';
+import chalk from 'chalk';
+import { runEslint, type Preset, type EcosystemIssue, ISSUE_CONFIDENCE } from '../utils/eslint-runner.js';
+import { log, CONFIDENCE_TIER, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
+import { buildSarifLog, sarifToJson } from '../utils/sarif.js';
+import {
+  getChangedFiles,
+  isGitHubActions,
+  getGitHubBaseRef,
+} from '../utils/git-diff.js';
+import {
+  emitGitHubAnnotations,
+  writeGitHubSummary,
+  writeGitHubOutputs,
+  buildGitHubSummaryMarkdown,
+} from '../utils/github-summary.js';
+import { getRunExitCode, formatIssueCount, renderIssuesByFile, partitionByTier, buildSignalSummary, resolveExitCode } from './run.js';
+import type { RunResult } from '../utils/eslint-runner.js';
+
+// ─── Register ─────────────────────────────────────────────────────────────────
+
+export function registerChangedCommand(program: Command): void {
+  program
+    .command('changed')
+    .description('Scan only changed files in the current PR or working tree (fastest CI mode)')
+    .option('--pr', 'Scan files changed vs base branch (auto-detects GITHUB_BASE_REF in CI)')
+    .option('--staged', 'Scan only staged (git add\'d) files')
+    .option('--base <branch>', 'Base branch to diff against (e.g. main, origin/main)')
+    .option('--path <dir>', 'Root path / working directory for scanning', '.')
+    .option('--strict', 'Use the strict rule preset (all rules at error)')
+    .option('--security', 'Use the security-only rule preset')
+    .option('--fail-on <level>', 'Fail CI on: high | medium | any | none', 'high')
+    .option('--json', 'Output results as JSON')
+    .option('--sarif', 'Output results as SARIF 2.1.0 (for GitHub Code Scanning)')
+    .option('--sarif-output <file>', 'Write SARIF to file instead of stdout')
+    .option('--github-summary', 'Write GitHub step summary (auto-enabled in GitHub Actions)')
+    .option('--max-warnings <n>', 'Fail if warnings exceed this count',
+      (v: string) => Number.parseInt(v, 10))
+    .option('--verbose', 'Expand all findings (disable grouping)')
+    .option('--quiet', 'Show errors only')
+    .option('--debug-timing', 'Print per-phase timing diagnostics')
+    .action(async (opts: {
+      pr?: boolean;
+      staged?: boolean;
+      base?: string;
+      path: string;
+      strict?: boolean;
+      security?: boolean;
+      failOn: string;
+      json?: boolean;
+      sarif?: boolean;
+      sarifOutput?: string;
+      githubSummary?: boolean;
+      maxWarnings?: number;
+      verbose?: boolean;
+      quiet?: boolean;
+      debugTiming?: boolean;
+    }) => {
+      const preset: Preset = opts.strict ? 'strict' : opts.security ? 'security' : 'recommended';
+      const inCI = isGitHubActions();
+      const baseRef = opts.base ?? (opts.pr || inCI ? getGitHubBaseRef() : undefined);
+
+      if (!opts.json && !opts.sarif) {
+        log.banner('AI GUARD');
+      }
+
+      // ── Detect changed files ────────────────────────────────────────────────
+      const cwd = process.cwd();
+      const resolvedPath = path.resolve(opts.path);
+      const workingDirectory = opts.path !== '.' ? opts.path : undefined;
+
+      const spinner = opts.json || opts.sarif
+        ? null
+        : ora({ text: chalk.dim('Detecting changed files…'), color: 'cyan' }).start();
+
+      const changedResult = getChangedFiles({
+        staged: opts.staged ?? false,
+        base: baseRef ? `origin/${baseRef}` : opts.base,
+        cwd,
+        workingDirectory,
+      });
+
+      if (changedResult.files.length === 0) {
+        spinner?.stop();
+
+        if (changedResult.mode === 'fallback') {
+          // Git not available — fall back to full scan
+          if (!opts.json && !opts.sarif) {
+            log.warn('Git not available. Falling back to full scan.');
+            log.blank();
+          }
+          // Delegate to full scan
+          const result = await runEslint({
+            preset,
+            targetPath: resolvedPath.toString(),
+            debugTiming: opts.debugTiming,
+          });
+          handleResults(result, opts, preset, 'full', 0, inCI);
+          return;
+        }
+
+        // No changed files of the right type
+        if (!opts.json && !opts.sarif) {
+          log.blank();
+          log.print(`  ${chalk.green('✔')}  No changed JS/TS files detected — nothing to scan`);
+          if (changedResult.filteredOut > 0) {
+            log.print(chalk.dim(`     (${changedResult.filteredOut} changed file${changedResult.filteredOut !== 1 ? 's' : ''} skipped — not JS/TS)`));
+          }
+          log.blank();
+        } else if (opts.json) {
+          console.log(JSON.stringify({
+            preset,
+            scanMode: changedResult.mode,
+            changedFiles: 0,
+            filesScanned: 0,
+            totalIssues: 0,
+            totalErrors: 0,
+            totalWarnings: 0,
+            signalSummary: { high: 0, medium: 0, low: 0, informational: 0, ecosystemIssues: 0, parserErrors: 0 },
+          }, null, 2));
+        }
+        process.exit(0);
+        return;
+      }
+
+      // ── Scan changed files ─────────────────────────────────────────────────
+      if (spinner) {
+        spinner.text = chalk.dim(`Scanning ${changedResult.files.length} changed file${changedResult.files.length !== 1 ? 's' : ''}…`);
+      }
+
+      const result = await runEslint({
+        preset,
+        targetPath: resolvedPath.toString(),
+        files: changedResult.files,
+        debugTiming: opts.debugTiming,
+      });
+
+      spinner?.stop();
+
+      handleResults(result, opts, preset, changedResult.mode === 'pr-diff' ? 'changed' : changedResult.mode === 'staged' ? 'staged' : 'changed', changedResult.files.length, inCI);
+    });
+}
+
+// ─── Shared result handler ────────────────────────────────────────────────────
+
+function handleResults(
+  result: RunResult,
+  opts: {
+    failOn: string;
+    json?: boolean;
+    sarif?: boolean;
+    sarifOutput?: string;
+    githubSummary?: boolean;
+    maxWarnings?: number;
+    verbose?: boolean;
+    quiet?: boolean;
+    path: string;
+    preset?: string;
+  },
+  preset: string,
+  scanMode: 'full' | 'changed' | 'staged',
+  changedFilesCount: number,
+  inCI: boolean,
+): Promise<void> {
+  // ── GitHub integrations ────────────────────────────────────────────────────
+  if (inCI || opts.githubSummary) {
+    writeGitHubSummary(result, { preset, scanMode, changedFilesCount });
+    writeGitHubOutputs(result, opts.sarifOutput);
+    emitGitHubAnnotations(result);
+  }
+
+  // ── SARIF mode ─────────────────────────────────────────────────────────────
+  if (opts.sarif) {
+    const sarifLog = buildSarifLog(result);
+    const sarifJson = sarifToJson(sarifLog);
+    if (opts.sarifOutput) {
+      fs.writeFileSync(opts.sarifOutput, sarifJson, 'utf-8');
+    } else {
+      console.log(sarifJson);
+    }
+    process.exit(getFailOnExitCode(result, opts.failOn, opts.maxWarnings));
+    return;
+  }
+
+  // ── JSON mode ──────────────────────────────────────────────────────────────
+  if (opts.json) {
+    const signalSummary = buildSignalSummary(result);
+    const jsonOutput = {
+      version: '1.3.0',
+      preset,
+      scanMode,
+      scannedPath: opts.path,
+      filesScanned: result.filesScanned,
+      changedFilesCount,
+      totalErrors: result.totalErrors,
+      totalWarnings: result.totalWarnings,
+      totalIssues: result.totalIssues,
+      durationMs: result.durationMs,
+      signalSummary,
+      ruleBreakdown: Object.fromEntries(result.ruleBreakdown),
+      topFiles: result.topFiles,
+      files: result.files,
+      ecosystemIssues: result.ecosystemIssues,
+      parserErrors: result.parserErrors,
+      tsParserAvailable: result.tsParserAvailable,
+    };
+    console.log(JSON.stringify(jsonOutput, null, 2));
+    process.exit(getFailOnExitCode(result, opts.failOn, opts.maxWarnings));
+    return;
+  }
+
+  // ── Human-readable output ──────────────────────────────────────────────────
+  const scanModeLabel = scanMode === 'changed'
+    ? 'Changed files'
+    : scanMode === 'staged'
+    ? 'Staged files'
+    : 'Full scan';
+
+  const modeTag = changedFilesCount > 0
+    ? `${changedFilesCount} changed`
+    : '';
+
+  log.summary(
+    result.filesScanned,
+    result.totalIssues,
+    result.files.filter((f) => f.issues.length > 0).length,
+    result.durationMs,
+    `${preset} · ${scanModeLabel}${modeTag ? ` (${modeTag})` : ''}` as string,
+  );
+
+  if (result.totalIssues === 0) {
+    log.blank();
+    log.success(`No AI issues found — ${result.filesScanned} file${result.filesScanned !== 1 ? 's' : ''} scanned, all clean`);
+    log.blank();
+  } else {
+    const verbose = opts.verbose ?? false;
+    const quiet = opts.quiet ?? false;
+    const { actionableFiles, informationalFiles } = partitionByTier(result, quiet);
+
+    // Category summary
+    log.section('Summary by Category');
+    const categoryErrors: Record<string, number> = {};
+    const categoryWarnings: Record<string, number> = {};
+    for (const file of actionableFiles) {
+      for (const issue of file.issues) {
+        const cat = RULE_CATEGORY[issue.ruleId] ?? 'Other';
+        if (issue.severity === 2) categoryErrors[cat] = (categoryErrors[cat] ?? 0) + 1;
+        else categoryWarnings[cat] = (categoryWarnings[cat] ?? 0) + 1;
+      }
+    }
+    const allCategories = new Set([...CATEGORY_ORDER, ...Object.keys(categoryErrors), ...Object.keys(categoryWarnings)]);
+    const sortedCats = [...allCategories].filter((c) => (categoryErrors[c] ?? 0) + (categoryWarnings[c] ?? 0) > 0)
+      .sort((a, b) => {
+        const ai = CATEGORY_ORDER.indexOf(a), bi = CATEGORY_ORDER.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.localeCompare(b);
+      });
+    for (const cat of sortedCats) {
+      const icon = CATEGORY_ICONS[cat] ?? '⚪';
+      log.category(icon, cat, categoryErrors[cat] ?? 0, categoryWarnings[cat] ?? 0);
+    }
+    log.blank();
+    log.print(`  ${chalk.bold('Total:')} ${formatIssueCount(result.totalErrors, result.totalWarnings)}`);
+    log.blank();
+
+    if (actionableFiles.length > 0) {
+      log.section('Issues by File');
+      log.blank();
+      renderIssuesByFile({ ...result, files: actionableFiles }, verbose, quiet);
+    }
+
+    const totalInfoCount = informationalFiles.reduce((n, f) => n + f.issues.length, 0);
+    if (totalInfoCount > 0 && !quiet) {
+      if (verbose) {
+        log.section('Informational Hints');
+        log.print(chalk.dim('  Stylistic hints with higher false-positive rate — review before acting.'));
+        log.blank();
+        renderIssuesByFile({ ...result, files: informationalFiles }, true, false);
+      } else {
+        log.blank();
+        log.print(`  ${chalk.gray('▸')}  ${chalk.gray(`${totalInfoCount} informational hint${totalInfoCount !== 1 ? 's' : ''} — run with ${chalk.cyan('--verbose')} to expand`)}`);
+      }
+    }
+  }
+
+  // Ecosystem issues
+  if (result.ecosystemIssues.length > 0) {
+    log.ecosystemSection('ESLint Config Issues');
+    log.print(chalk.dim('  These issues come from your project\'s ESLint config, not from ai-guard.'));
+    log.blank();
+    const seen = new Map<string, { issue: EcosystemIssue; count: number }>();
+    for (const issue of result.ecosystemIssues) {
+      const key = `${issue.ruleId ?? 'null'}::${issue.message}`;
+      const existing = seen.get(key);
+      if (existing) { existing.count++; } else { seen.set(key, { issue, count: 1 }); }
+    }
+    for (const { issue, count } of seen.values()) {
+      log.ecosystemIssue(issue, count);
+    }
+    log.blank();
+  }
+
+  log.divider();
+  log.blank();
+  log.section('Next Steps');
+  if (result.totalIssues > 0) {
+    log.info(`Run ${chalk.cyan('ai-guard baseline')} to save these issues and track only new ones`);
+    log.info(`Run ${chalk.cyan('ai-guard report')}   to generate a shareable HTML report`);
+  }
+  if (result.ecosystemIssues.length > 0) {
+    log.info(`Run ${chalk.cyan('ai-guard doctor')}   to diagnose ESLint config issues`);
+  }
+  log.blank();
+
+  process.exit(getFailOnExitCode(result, opts.failOn, opts.maxWarnings));
+}
+
+// ─── Fail-on exit code logic ──────────────────────────────────────────────────
+
+/**
+ * Determine exit code based on --fail-on level.
+ * Uses ISSUE_CONFIDENCE lookup (statically imported) for tier resolution.
+ */
+export function getFailOnExitCode(
+  result: RunResult,
+  failOn: string,
+  maxWarnings?: number,
+): number {
+  return resolveExitCode(result, failOn, maxWarnings);
+}

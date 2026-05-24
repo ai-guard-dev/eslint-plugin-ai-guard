@@ -1,0 +1,90 @@
+# AI Guard — Monorepo Workflow (pnpm workspaces / Turborepo)
+#
+# Scans each package independently when its files change.
+# Uses matrix strategy to scan frontend and backend separately.
+# Works with: pnpm workspaces, turborepo, nx, yarn workspaces.
+
+name: AI Guard — Monorepo
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  security-events: write
+  actions: write
+
+jobs:
+  ai-guard:
+    name: AI Guard — ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: frontend
+            path: packages/frontend
+            preset: recommended
+            fail-on: high
+          - package: backend
+            path: packages/backend
+            preset: strict
+            fail-on: medium
+          - package: api
+            path: packages/api
+            preset: strict
+            fail-on: medium
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: AI Guard — ${{ matrix.package }}
+        id: scan
+        run: |
+          npx ai-guard changed \
+            --pr \
+            --path ${{ matrix.path }} \
+            --fail-on ${{ matrix.fail-on }} \
+            --sarif \
+            --sarif-output ai-guard-${{ matrix.package }}.sarif
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+        continue-on-error: true
+
+      - name: Upload SARIF — ${{ matrix.package }}
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ai-guard-${{ matrix.package }}.sarif
+          category: ai-guard-${{ matrix.package }}
+
+  # Aggregate job — required for branch protection
+  ai-guard-pass:
+    name: AI Guard
+    needs: ai-guard
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          if [ "${{ needs.ai-guard.result }}" != "success" ]; then
+            echo "One or more AI Guard checks failed"
+            exit 1
+          fi

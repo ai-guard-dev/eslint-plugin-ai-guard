@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
 import { registerRunCommand } from './commands/run.js';
+import { registerChangedCommand } from './commands/changed.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerPresetCommand } from './commands/preset.js';
@@ -36,6 +37,7 @@ program
     'Catch AI-generated code issues instantly — no ESLint config required.\n\n' +
     'Quick start:\n' +
     '  npx ai-guard run          Scan current project\n' +
+    '  npx ai-guard changed      Scan only changed files (CI mode)\n' +
     '  npx ai-guard init         Auto-configure ESLint\n' +
     '  npx ai-guard init-context Generate AI agent rules\n' +
     '  npx ai-guard report       Generate shareable HTML report\n' +
@@ -48,6 +50,7 @@ program
 // ─── Register commands ────────────────────────────────────────────────────────
 
 registerRunCommand(program);
+registerChangedCommand(program);
 registerInitCommand(program);
 registerDoctorCommand(program);
 registerPresetCommand(program);
