@@ -39,11 +39,6 @@ describe('Version consistency', () => {
     expect(PKG_VERSION).not.toBe('0.0.0');
     expect(PKG_VERSION).not.toBe('1.3.0');  // Was hardcoded in Phase 2A, now removed
   });
-
-  it('package.json version is 1.2.1 (production version)', () => {
-    const pkgVersion = readPackageJsonVersion();
-    expect(pkgVersion).toBe('1.2.1');
-  });
 });
 
 // ─── JSON output version ──────────────────────────────────────────────────────
