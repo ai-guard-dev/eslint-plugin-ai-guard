@@ -1,0 +1,64 @@
+# AI Guard — pnpm Workspace CI
+# Scans changed JS/TS files on every PR for async reliability issues.
+# Designed for pnpm-based monorepos.
+#
+# Usage:
+#   1. Copy to .github/workflows/ai-guard.yml
+#   2. Ensure pnpm is configured in your repo (see pnpm/action-setup)
+#   3. Set fetch-depth: 0 to allow accurate PR diff detection
+
+name: AI Guard (pnpm)
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+  push:
+    branches: [main, master]
+
+jobs:
+  ai-guard:
+    name: AI Reliability Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # CRITICAL: fetch-depth: 0 is required for accurate PR diff detection.
+          # Without this, shallow clones cause ai-guard changed --pr to return 0 files.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install ai-guard
+        run: pnpm add -D eslint-plugin-ai-guard
+
+      - name: Run AI Guard (PR diff only)
+        run: |
+          npx ai-guard changed \
+            --pr \
+            --fail-on high \
+            --sarif-output ai-guard-results.sarif \
+            --github-summary
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Upload to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ai-guard-results.sarif
+          category: ai-guard

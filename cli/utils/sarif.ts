@@ -11,6 +11,7 @@
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
 import { ISSUE_CONFIDENCE, ISSUE_CATEGORY, ISSUE_ASYNC_RISK_TYPE, ISSUE_REMEDIATION } from './eslint-runner.js';
 import { CONFIDENCE_TIER } from './logger.js';
+import { PKG_VERSION } from './version.js';
 import type { ConfidenceTier } from './logger.js';
 
 // ─── SARIF type definitions ────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
  * are excluded — they are not ai-guard findings and should not appear in
  * Code Scanning results.
  */
-export function buildSarifLog(result: RunResult, version = '1.3.0'): SarifLog {
+export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLog {
   const usedRuleIds = collectUsedRuleIds(result);
   const rules = buildRuleDescriptors(usedRuleIds);
 

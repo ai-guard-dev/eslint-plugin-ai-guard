@@ -45,9 +45,9 @@ jobs:
         run: |
           # Scan only changed files on PRs, full scan on push
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npx ai-guard changed --pr --fail-on high --sarif --sarif-output ai-guard-results.sarif
+            npx ai-guard changed --pr --fail-on high --sarif-output ai-guard-results.sarif
           else
-            npx ai-guard run --fail-on high --sarif > ai-guard-results.sarif
+            npx ai-guard run --fail-on high --sarif-output ai-guard-results.sarif
           fi
         continue-on-error: true
         env:

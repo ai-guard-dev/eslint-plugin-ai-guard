@@ -12,6 +12,48 @@ import type { RunResult, IssueDetail } from './eslint-runner.js';
 import { CONFIDENCE_TIER, RULE_CATEGORY } from './logger.js';
 import type { ConfidenceTier } from './logger.js';
 
+// ─── Environment availability ─────────────────────────────────────────────────
+
+/**
+ * Returns true if GITHUB_STEP_SUMMARY is set and the path is writable.
+ * Safe to call in any environment — never throws.
+ */
+export function isGitHubSummaryAvailable(): boolean {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return false;
+  try {
+    const fd = fs.openSync(summaryPath, 'a');
+    fs.closeSync(fd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true if GITHUB_OUTPUT is set and writable.
+ */
+export function isGitHubOutputAvailable(): boolean {
+  const outputPath = process.env.GITHUB_OUTPUT;
+  if (!outputPath) return false;
+  try {
+    const fd = fs.openSync(outputPath, 'a');
+    fs.closeSync(fd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Soft-warn to stderr only — never stdout, never throws, never fails CI. */
+function warnEnvIssue(name: string, filePath: string, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  process.stderr.write(
+    `[ai-guard] Warning: Could not write to ${name}=${filePath}: ${msg}\n`,
+  );
+}
+
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SummaryOptions {
@@ -265,30 +307,40 @@ function buildCategoryBreakdown(result: RunResult): Record<string, {
 
 /**
  * Write the step summary to $GITHUB_STEP_SUMMARY file.
- * No-ops if not in GitHub Actions context.
+ *
+ * Behavior:
+ * - No-ops gracefully if GITHUB_STEP_SUMMARY is not set
+ * - Soft-warns to stderr (never stdout) if the path is set but not writable
+ * - Never throws — CI scan output is the primary feedback channel
  */
 export function writeGitHubSummary(
   result: RunResult,
   options: SummaryOptions,
 ): void {
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
-  if (!summaryPath) return;
+  if (!summaryPath) return;  // Not in GitHub Actions — silently no-op
 
   try {
     const markdown = buildGitHubSummaryMarkdown(result, options);
-    fs.appendFileSync(summaryPath, markdown + '\n');
-  } catch {
-    // Non-fatal — CI output is primary feedback channel
+    fs.appendFileSync(summaryPath, markdown + '\n', { encoding: 'utf-8' });
+  } catch (err) {
+    // Non-fatal — warn to stderr so it shows in CI logs but never fails the scan
+    warnEnvIssue('GITHUB_STEP_SUMMARY', summaryPath, err);
   }
 }
 
 /**
  * Write output parameters to $GITHUB_OUTPUT.
  * Used by the GitHub Action to expose outputs to subsequent steps.
+ *
+ * Behavior:
+ * - No-ops gracefully if GITHUB_OUTPUT is not set
+ * - Soft-warns to stderr if the path is set but not writable
+ * - Never throws
  */
 export function writeGitHubOutputs(result: RunResult, sarifPath?: string): void {
   const outputPath = process.env.GITHUB_OUTPUT;
-  if (!outputPath) return;
+  if (!outputPath) return;  // Not in GitHub Actions — silently no-op
 
   const { high, medium, low, informational } = buildSignalCounts(result);
 
@@ -304,8 +356,8 @@ export function writeGitHubOutputs(result: RunResult, sarifPath?: string): void 
   ];
 
   try {
-    fs.appendFileSync(outputPath, outputs.join('\n') + '\n');
-  } catch {
-    // Non-fatal
+    fs.appendFileSync(outputPath, outputs.join('\n') + '\n', { encoding: 'utf-8' });
+  } catch (err) {
+    warnEnvIssue('GITHUB_OUTPUT', outputPath, err);
   }
 }

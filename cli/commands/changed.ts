@@ -31,6 +31,8 @@ import {
   writeGitHubOutputs,
   buildGitHubSummaryMarkdown,
 } from '../utils/github-summary.js';
+import { printGitDebug, printCIDebug } from '../utils/debug.js';
+import { PKG_VERSION } from '../utils/version.js';
 import { getRunExitCode, formatIssueCount, renderIssuesByFile, partitionByTier, buildSignalSummary, resolveExitCode } from './run.js';
 import type { RunResult } from '../utils/eslint-runner.js';
 
@@ -42,20 +44,23 @@ export function registerChangedCommand(program: Command): void {
     .description('Scan only changed files in the current PR or working tree (fastest CI mode)')
     .option('--pr', 'Scan files changed vs base branch (auto-detects GITHUB_BASE_REF in CI)')
     .option('--staged', 'Scan only staged (git add\'d) files')
-    .option('--base <branch>', 'Base branch to diff against (e.g. main, origin/main)')
+    .option('--base <branch>', 'Base branch to diff against (raw name: main, develop — not origin/main)')
     .option('--path <dir>', 'Root path / working directory for scanning', '.')
     .option('--strict', 'Use the strict rule preset (all rules at error)')
     .option('--security', 'Use the security-only rule preset')
-    .option('--fail-on <level>', 'Fail CI on: high | medium | any | none', 'high')
+    .option('--fail-on <level>', 'Fail CI on: high | medium | any | errors | none', 'high')
     .option('--json', 'Output results as JSON')
     .option('--sarif', 'Output results as SARIF 2.1.0 (for GitHub Code Scanning)')
-    .option('--sarif-output <file>', 'Write SARIF to file instead of stdout')
+    .option('--sarif-output <file>', 'Write SARIF to this file path')
+    .option('--sarif-stdout', 'Force SARIF to stdout even in CI (overrides auto-file behavior)')
     .option('--github-summary', 'Write GitHub step summary (auto-enabled in GitHub Actions)')
     .option('--max-warnings <n>', 'Fail if warnings exceed this count',
       (v: string) => Number.parseInt(v, 10))
     .option('--verbose', 'Expand all findings (disable grouping)')
     .option('--quiet', 'Show errors only')
     .option('--debug-timing', 'Print per-phase timing diagnostics')
+    .option('--debug-git', 'Print full git resolution trace (useful for diagnosing zero-file issues)')
+    .option('--debug-ci', 'Print CI environment state (GITHUB_* vars, SARIF path, summary path)')
     .action(async (opts: {
       pr?: boolean;
       staged?: boolean;
@@ -67,21 +72,55 @@ export function registerChangedCommand(program: Command): void {
       json?: boolean;
       sarif?: boolean;
       sarifOutput?: string;
+      sarifStdout?: boolean;
       githubSummary?: boolean;
       maxWarnings?: number;
       verbose?: boolean;
       quiet?: boolean;
       debugTiming?: boolean;
+      debugGit?: boolean;
+      debugCi?: boolean;
     }) => {
       const preset: Preset = opts.strict ? 'strict' : opts.security ? 'security' : 'recommended';
       const inCI = isGitHubActions();
+      // FIX: Pass raw branch name — getChangedFiles owns all ref normalization.
+      // Previously, changed.ts prepended origin/ here AND git-diff.ts did it again
+      // → git merge-base HEAD origin/origin/main — always fails.
       const baseRef = opts.base ?? (opts.pr || inCI ? getGitHubBaseRef() : undefined);
+
+      // Resolve SARIF output path:
+      // - CI: default to file output (predictable for upload-sarif)
+      // - local: stdout unless --sarif-output specified
+      // - --sarif-stdout: force stdout in any environment
+      const sarifToFile = opts.sarif && !opts.sarifStdout && (opts.sarifOutput || inCI);
+      const resolvedSarifPath = opts.sarifOutput ?? (sarifToFile ? 'ai-guard-results.sarif' : undefined);
 
       if (!opts.json && !opts.sarif) {
         log.banner('AI GUARD');
       }
 
-      // ── Detect changed files ────────────────────────────────────────────────
+      // ── Debug CI ────────────────────────────────────────────────────────────
+      if (opts.debugCi) {
+        const { printCIDebug } = await import('../utils/debug.js');
+        printCIDebug({
+          isGitHubActions: inCI,
+          githubBaseRef: process.env.GITHUB_BASE_REF,
+          githubSha: process.env.GITHUB_SHA,
+          githubRef: process.env.GITHUB_REF,
+          githubRepository: process.env.GITHUB_REPOSITORY,
+          githubWorkflow: process.env.GITHUB_WORKFLOW,
+          githubRunId: process.env.GITHUB_RUN_ID,
+          githubEventName: process.env.GITHUB_EVENT_NAME,
+          githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
+          githubOutput: process.env.GITHUB_OUTPUT,
+          sarifOutputPath: resolvedSarifPath,
+          preset,
+          failOn: opts.failOn,
+          scanMode: opts.staged ? 'staged' : baseRef ? 'pr-diff' : 'uncommitted',
+        });
+      }
+
+      // ── Detect changed files ─────────────────────────────────────────────────
       const cwd = process.cwd();
       const resolvedPath = path.resolve(opts.path);
       const workingDirectory = opts.path !== '.' ? opts.path : undefined;
@@ -92,10 +131,17 @@ export function registerChangedCommand(program: Command): void {
 
       const changedResult = getChangedFiles({
         staged: opts.staged ?? false,
-        base: baseRef ? `origin/${baseRef}` : opts.base,
+        base: baseRef,
         cwd,
         workingDirectory,
+        debug: opts.debugGit,
       });
+
+      // ── Debug git output ─────────────────────────────────────────────────────
+      if (opts.debugGit) {
+        const { printGitDebug } = await import('../utils/debug.js');
+        printGitDebug(changedResult);
+      }
 
       if (changedResult.files.length === 0) {
         spinner?.stop();
@@ -112,20 +158,27 @@ export function registerChangedCommand(program: Command): void {
             targetPath: resolvedPath.toString(),
             debugTiming: opts.debugTiming,
           });
-          handleResults(result, opts, preset, 'full', 0, inCI);
+          handleResults(result, opts, preset, 'full', 0, inCI, resolvedSarifPath);
           return;
         }
 
-        // No changed files of the right type
+        // Explicit warning when zero files — never silent
         if (!opts.json && !opts.sarif) {
           log.blank();
-          log.print(`  ${chalk.green('✔')}  No changed JS/TS files detected — nothing to scan`);
+          log.print(`  ${chalk.yellow('⚠')}  No changed JS/TS files detected — nothing to scan`);
+          if (changedResult.zeroFilesReason) {
+            log.print(chalk.dim(`     ${changedResult.zeroFilesReason}`));
+          }
           if (changedResult.filteredOut > 0) {
-            log.print(chalk.dim(`     (${changedResult.filteredOut} changed file${changedResult.filteredOut !== 1 ? 's' : ''} skipped — not JS/TS)`));
+            log.print(chalk.dim(`     (${changedResult.filteredOut} file${changedResult.filteredOut !== 1 ? 's' : ''} filtered out)`));
+          }
+          if (!opts.debugGit) {
+            log.print(chalk.dim('     Run with --debug-git for full git resolution trace.'));
           }
           log.blank();
         } else if (opts.json) {
           console.log(JSON.stringify({
+            version: PKG_VERSION,
             preset,
             scanMode: changedResult.mode,
             changedFiles: 0,
@@ -133,6 +186,8 @@ export function registerChangedCommand(program: Command): void {
             totalIssues: 0,
             totalErrors: 0,
             totalWarnings: 0,
+            zeroFilesReason: changedResult.zeroFilesReason,
+            debugInfo: opts.debugGit ? changedResult.debugInfo : undefined,
             signalSummary: { high: 0, medium: 0, low: 0, informational: 0, ecosystemIssues: 0, parserErrors: 0 },
           }, null, 2));
         }
@@ -154,7 +209,9 @@ export function registerChangedCommand(program: Command): void {
 
       spinner?.stop();
 
-      handleResults(result, opts, preset, changedResult.mode === 'pr-diff' ? 'changed' : changedResult.mode === 'staged' ? 'staged' : 'changed', changedResult.files.length, inCI);
+      const scanMode: 'full' | 'changed' | 'staged' =
+        changedResult.mode === 'staged' ? 'staged' : 'changed';
+      handleResults(result, opts, preset, scanMode, changedResult.files.length, inCI, resolvedSarifPath);
     });
 }
 
@@ -167,17 +224,20 @@ function handleResults(
     json?: boolean;
     sarif?: boolean;
     sarifOutput?: string;
+    sarifStdout?: boolean;
     githubSummary?: boolean;
     maxWarnings?: number;
     verbose?: boolean;
     quiet?: boolean;
     path: string;
     preset?: string;
+    debugGit?: boolean;
   },
   preset: string,
   scanMode: 'full' | 'changed' | 'staged',
   changedFilesCount: number,
   inCI: boolean,
+  resolvedSarifPath?: string,
 ): Promise<void> {
   // ── GitHub integrations ────────────────────────────────────────────────────
   if (inCI || opts.githubSummary) {
@@ -190,9 +250,11 @@ function handleResults(
   if (opts.sarif) {
     const sarifLog = buildSarifLog(result);
     const sarifJson = sarifToJson(sarifLog);
-    if (opts.sarifOutput) {
-      fs.writeFileSync(opts.sarifOutput, sarifJson, 'utf-8');
+    // Write to file if a path was resolved (CI default or explicit --sarif-output)
+    if (resolvedSarifPath) {
+      fs.writeFileSync(resolvedSarifPath, sarifJson, 'utf-8');
     } else {
+      // stdout mode: local usage or --sarif-stdout
       console.log(sarifJson);
     }
     process.exit(getFailOnExitCode(result, opts.failOn, opts.maxWarnings));
@@ -203,7 +265,7 @@ function handleResults(
   if (opts.json) {
     const signalSummary = buildSignalSummary(result);
     const jsonOutput = {
-      version: '1.3.0',
+      version: PKG_VERSION,
       preset,
       scanMode,
       scannedPath: opts.path,
