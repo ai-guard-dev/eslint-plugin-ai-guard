@@ -241,10 +241,23 @@ describe('No undefined or null values in SARIF properties', () => {
     }
   });
 
-  it('rule properties[problem.severity] is never undefined', () => {
+  it('rule properties[security-severity] is never undefined and is a valid value', () => {
+    const validSeverities = new Set(['8.0', '5.0', '3.0', '1.0']);
     const sarif = buildSarifLog(makeResult(ALL_RULES));
     for (const rule of sarif.runs[0].tool.driver.rules) {
-      expect(rule.properties?.['problem.severity']).toBeDefined();
+      const sev = rule.properties?.['security-severity'];
+      expect(sev).toBeDefined();
+      expect(validSeverities.has(sev ?? '')).toBe(true);
+    }
+  });
+
+  it('rule properties.precision is never undefined and is valid', () => {
+    const validPrecisions = new Set(['high', 'medium', 'low']);
+    const sarif = buildSarifLog(makeResult(ALL_RULES));
+    for (const rule of sarif.runs[0].tool.driver.rules) {
+      const precision = rule.properties?.precision;
+      expect(precision).toBeDefined();
+      expect(validPrecisions.has(precision ?? '')).toBe(true);
     }
   });
 
@@ -392,13 +405,14 @@ describe('buildSarifDebugInfo', () => {
     expect(rule.hasDuplicatesInRaw).toBe(true);
   });
 
-  it('sanitized tags are shorter than raw tags when duplicates present', () => {
+  it('sanitized tags have no duplicate items even when raw tags did', () => {
     const result = makeResult(['ai-guard/no-floating-promise']);
     const debug = buildSarifDebugInfo(result);
     const rule = debug.rulesEmitted[0];
-    if (rule.hasDuplicatesInRaw) {
-      expect(rule.sanitizedTags.length).toBeLessThan(rule.rawTags.length);
-    }
+    expect(rule.hasDuplicatesInRaw).toBe(true);
+    const unique = new Set(rule.sanitizedTags);
+    expect(unique.size).toBe(rule.sanitizedTags.length);
+    expect(rule.sanitizedTags.filter(t => t === 'async-reliability')).toHaveLength(1);
   });
 
   it('rules without duplicates show hasDuplicatesInRaw=false', () => {
@@ -446,13 +460,55 @@ describe('GitHub Code Scanning compatibility', () => {
     expect(result.level).toBe('warning');
   });
 
-  it('problem.severity is set for all rules', () => {
-    const validSeverities = new Set(['high', 'medium', 'low', 'recommendation']);
+  it('security-severity is set for all rules', () => {
+    const validSeverities = new Set(['8.0', '5.0', '3.0', '1.0']);
     const sarif = buildSarifLog(makeResult(ALL_RULES));
     for (const rule of sarif.runs[0].tool.driver.rules) {
-      const sev = rule.properties?.['problem.severity'];
+      const sev = rule.properties?.['security-severity'];
       expect(sev).toBeDefined();
       expect(validSeverities.has(sev ?? '')).toBe(true);
+    }
+  });
+
+  it('adds security-severity and precision to all results', () => {
+    const validSeverities = new Set(['8.0', '5.0', '3.0', '1.0']);
+    const validPrecisions = new Set(['high', 'medium', 'low']);
+    const sarif = buildSarifLog(makeResult(ALL_RULES));
+    for (const result of sarif.runs[0].results) {
+      expect(result.properties?.['security-severity']).toBeDefined();
+      expect(validSeverities.has(result.properties?.['security-severity'] ?? '')).toBe(true);
+      expect(result.properties?.precision).toBeDefined();
+      expect(validPrecisions.has(result.properties?.precision ?? '')).toBe(true);
+    }
+  });
+
+  it('adds GitHub semantic tags and deduplicates correctly', () => {
+    const sarif = buildSarifLog(makeResult(ALL_RULES));
+    for (const rule of sarif.runs[0].tool.driver.rules) {
+      const tags = rule.properties?.tags ?? [];
+      // Every rule must have correctness and reliability
+      expect(tags).toContain('correctness');
+      expect(tags).toContain('reliability');
+      // Only security rules must have security tag
+      if (rule.id.includes('secret') || rule.id.includes('eval') || rule.id.includes('sql') || rule.id.includes('deserialize') || rule.id.includes('auth')) {
+        expect(tags).toContain('security');
+      } else {
+        expect(tags).not.toContain('security');
+      }
+      // Tags must be unique
+      const unique = new Set(tags);
+      expect(unique.size).toBe(tags.length);
+    }
+  });
+
+  it('strictly normalizes result levels and configurations', () => {
+    const sarif = buildSarifLog(makeResult(ALL_RULES));
+    const validLevels = new Set(['error', 'warning', 'note']);
+    for (const result of sarif.runs[0].results) {
+      expect(validLevels.has(result.level)).toBe(true);
+    }
+    for (const rule of sarif.runs[0].tool.driver.rules) {
+      expect(validLevels.has(rule.defaultConfiguration?.level ?? 'none')).toBe(true);
     }
   });
 

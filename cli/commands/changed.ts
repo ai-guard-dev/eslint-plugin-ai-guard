@@ -19,7 +19,7 @@ import ora from 'ora';
 import chalk from 'chalk';
 import { runEslint, type Preset, type EcosystemIssue, ISSUE_CONFIDENCE } from '../utils/eslint-runner.js';
 import { log, CONFIDENCE_TIER, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
-import { buildSarifLog, sarifToJson } from '../utils/sarif.js';
+import { buildSarifLog, sarifToJson, buildSarifDebugInfo } from '../utils/sarif.js';
 import {
   getChangedFiles,
   isGitHubActions,
@@ -61,6 +61,7 @@ export function registerChangedCommand(program: Command): void {
     .option('--debug-timing', 'Print per-phase timing diagnostics')
     .option('--debug-git', 'Print full git resolution trace (useful for diagnosing zero-file issues)')
     .option('--debug-ci', 'Print CI environment state (GITHUB_* vars, SARIF path, summary path)')
+    .option('--debug-sarif', 'Print SARIF tag normalization trace — diagnose duplicate-tag schema issues')
     .action(async (opts: {
       pr?: boolean;
       staged?: boolean;
@@ -80,6 +81,7 @@ export function registerChangedCommand(program: Command): void {
       debugTiming?: boolean;
       debugGit?: boolean;
       debugCi?: boolean;
+      debugSarif?: boolean;
     }) => {
       const preset: Preset = opts.strict ? 'strict' : opts.security ? 'security' : 'recommended';
       const inCI = isGitHubActions();
@@ -232,6 +234,7 @@ function handleResults(
     path: string;
     preset?: string;
     debugGit?: boolean;
+    debugSarif?: boolean;
   },
   preset: string,
   scanMode: 'full' | 'changed' | 'staged',
@@ -250,9 +253,46 @@ function handleResults(
   if (opts.sarif) {
     const sarifLog = buildSarifLog(result);
     const sarifJson = sarifToJson(sarifLog);
+
+    // --debug-sarif: print SARIF metadata and tag trace to stderr
+    if (opts.debugSarif) {
+      const debugInfo = buildSarifDebugInfo(result);
+      process.stderr.write('\n[debug-sarif] SARIF GitHub Compatibility Trace\n');
+      process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n');
+      process.stderr.write('[debug-sarif] Rules Emitted:\n');
+      for (const r of debugInfo.rulesEmitted) {
+        process.stderr.write(`[debug-sarif]   - ${r.id}:\n`);
+        process.stderr.write(`[debug-sarif]     confidence:        ${r.confidence}\n`);
+        process.stderr.write(`[debug-sarif]     level:             ${r.level}\n`);
+        process.stderr.write(`[debug-sarif]     security-severity: ${r.securitySeverity}\n`);
+        process.stderr.write(`[debug-sarif]     precision:         ${r.precision}\n`);
+        process.stderr.write(`[debug-sarif]     raw tags:          ${JSON.stringify(r.rawTags)}\n`);
+        process.stderr.write(`[debug-sarif]     normalized tags:   ${JSON.stringify(r.sanitizedTags)}\n`);
+        if (r.hasDuplicatesInRaw) {
+          process.stderr.write(`[debug-sarif]     ⚠ had duplicates — deduplicated\n`);
+        }
+      }
+      process.stderr.write('\n[debug-sarif] Results Emitted:\n');
+      if (debugInfo.resultsEmitted.length === 0) {
+        process.stderr.write('[debug-sarif]   (none)\n');
+      } else {
+        for (const res of debugInfo.resultsEmitted) {
+          process.stderr.write(`[debug-sarif]   - ${res.ruleId} (${res.filePath}:${res.line}):\n`);
+          process.stderr.write(`[debug-sarif]     level:             ${res.level}\n`);
+          process.stderr.write(`[debug-sarif]     kind:              ${res.kind}\n`);
+          process.stderr.write(`[debug-sarif]     security-severity: ${res.securitySeverity}\n`);
+          process.stderr.write(`[debug-sarif]     precision:         ${res.precision}\n`);
+        }
+      }
+      process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n\n');
+    }
+
     // Write to file if a path was resolved (CI default or explicit --sarif-output)
     if (resolvedSarifPath) {
       fs.writeFileSync(resolvedSarifPath, sarifJson, 'utf-8');
+      if (opts.debugSarif) {
+        process.stderr.write(`[debug-sarif] SARIF written to: ${resolvedSarifPath}\n`);
+      }
     } else {
       // stdout mode: local usage or --sarif-stdout
       console.log(sarifJson);

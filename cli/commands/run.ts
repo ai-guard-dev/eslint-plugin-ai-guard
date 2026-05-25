@@ -120,20 +120,37 @@ export function registerRunCommand(program: Command): void {
         const sarifLog = buildSarifLog(result);
         const sarifJson = sarifToJson(sarifLog);
 
-        // --debug-sarif: print tag normalization trace to stderr
+        // --debug-sarif: print SARIF metadata and tag trace to stderr
         if (opts.debugSarif) {
           const debugInfo = buildSarifDebugInfo(result);
-          process.stderr.write('\n[debug-sarif] SARIF Tag Normalization Trace\n');
+          process.stderr.write('\n[debug-sarif] SARIF GitHub Compatibility Trace\n');
           process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n');
+          process.stderr.write('[debug-sarif] Rules Emitted:\n');
           for (const r of debugInfo.rulesEmitted) {
-            process.stderr.write(`[debug-sarif] ${r.id}\n`);
-            process.stderr.write(`[debug-sarif]   raw:       ${JSON.stringify(r.rawTags)}\n`);
-            process.stderr.write(`[debug-sarif]   sanitized: ${JSON.stringify(r.sanitizedTags)}\n`);
+            process.stderr.write(`[debug-sarif]   - ${r.id}:\n`);
+            process.stderr.write(`[debug-sarif]     confidence:        ${r.confidence}\n`);
+            process.stderr.write(`[debug-sarif]     level:             ${r.level}\n`);
+            process.stderr.write(`[debug-sarif]     security-severity: ${r.securitySeverity}\n`);
+            process.stderr.write(`[debug-sarif]     precision:         ${r.precision}\n`);
+            process.stderr.write(`[debug-sarif]     raw tags:          ${JSON.stringify(r.rawTags)}\n`);
+            process.stderr.write(`[debug-sarif]     normalized tags:   ${JSON.stringify(r.sanitizedTags)}\n`);
             if (r.hasDuplicatesInRaw) {
-              process.stderr.write(`[debug-sarif]   ⚠ had duplicates — deduplicated\n`);
+              process.stderr.write(`[debug-sarif]     ⚠ had duplicates — deduplicated\n`);
             }
           }
-          process.stderr.write('\n');
+          process.stderr.write('\n[debug-sarif] Results Emitted:\n');
+          if (debugInfo.resultsEmitted.length === 0) {
+            process.stderr.write('[debug-sarif]   (none)\n');
+          } else {
+            for (const res of debugInfo.resultsEmitted) {
+              process.stderr.write(`[debug-sarif]   - ${res.ruleId} (${res.filePath}:${res.line}):\n`);
+              process.stderr.write(`[debug-sarif]     level:             ${res.level}\n`);
+              process.stderr.write(`[debug-sarif]     kind:              ${res.kind}\n`);
+              process.stderr.write(`[debug-sarif]     security-severity: ${res.securitySeverity}\n`);
+              process.stderr.write(`[debug-sarif]     precision:         ${res.precision}\n`);
+            }
+          }
+          process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n\n');
         }
 
         if (opts.sarifOutput) {

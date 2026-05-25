@@ -58,7 +58,8 @@ interface SarifReportingDescriptor {
     tags?: string[];
     confidence?: string;
     category?: string;
-    'problem.severity'?: string;
+    'security-severity'?: string;
+    precision?: string;
   };
 }
 
@@ -73,6 +74,8 @@ interface SarifResult {
     confidence?: string;
     asyncRiskType?: string;
     category?: string;
+    'security-severity'?: string;
+    precision?: string;
   };
 }
 
@@ -168,13 +171,14 @@ export function sanitizeSarifProperties(props: {
   tags: (string | undefined | null)[];
   confidence: string | undefined;
   category: string | undefined;
-  problemSeverity: string | undefined;
 }): SarifReportingDescriptor['properties'] {
+  const confidence = props.confidence ?? 'low';
   return {
     tags: sanitizeSarifTags(props.tags),
-    confidence: props.confidence ?? 'low',
+    confidence,
     category: props.category ?? 'AI Patterns',
-    'problem.severity': props.problemSeverity ?? 'low',
+    'security-severity': confidenceToSecuritySeverity(confidence),
+    precision: confidenceToPrecision(confidence),
   };
 }
 
@@ -227,6 +231,26 @@ export function sanitizeSarifLog(log: SarifLog): SarifLog {
 
 // ─── Confidence → SARIF mapping ──────────────────────────────────────────────
 
+export function confidenceToSecuritySeverity(confidence: string | undefined): string {
+  switch (confidence) {
+    case 'high':          return '8.0';
+    case 'medium':        return '5.0';
+    case 'low':           return '3.0';
+    case 'informational': return '1.0';
+    default:              return '3.0';
+  }
+}
+
+export function confidenceToPrecision(confidence: string | undefined): 'high' | 'medium' | 'low' {
+  switch (confidence) {
+    case 'high':          return 'high';
+    case 'medium':        return 'medium';
+    case 'low':           return 'low';
+    case 'informational': return 'low';
+    default:              return 'low';
+  }
+}
+
 function confidenceToSarifLevel(confidence: string | undefined): 'error' | 'warning' | 'note' | 'none' {
   switch (confidence) {
     case 'high':          return 'error';
@@ -244,16 +268,6 @@ function confidenceToRank(confidence: string | undefined): number {
     case 'low':           return 30;
     case 'informational': return 10;
     default:              return 30;
-  }
-}
-
-function confidenceToGitHubSeverity(confidence: string | undefined): string {
-  switch (confidence) {
-    case 'high':          return 'high';
-    case 'medium':        return 'medium';
-    case 'low':           return 'low';
-    case 'informational': return 'recommendation';
-    default:              return 'low';
   }
 }
 
@@ -284,11 +298,7 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
     // Derive category slug (e.g. "Async Reliability" → "async-reliability")
     const categorySlug = category.toLowerCase().replace(/\s+/g, '-');
 
-    // FIX: Combine base tags + category slug, then deduplicate via sanitizeSarifTags.
-    // Previously, this was a naive spread: [...meta.tags, categorySlug]
-    // which produced duplicates like ['async', 'async-reliability', 'async-reliability']
-    // when the category slug was already present in the base tags.
-    // Now sanitizeSarifTags() uses a Set to guarantee uniqueItems compliance.
+    // Combine base tags + category slug, then deduplicate via sanitizeSarifTags.
     const rawTags = [...(meta?.tags ?? ['ai-guard']), categorySlug];
 
     const helpMarkdown = [
@@ -319,7 +329,6 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
         tags: rawTags,
         confidence,
         category,
-        problemSeverity: confidenceToGitHubSeverity(confidence),
       }),
     });
   });
@@ -355,6 +364,8 @@ function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
     ],
     properties: {
       confidence: confidence ?? 'low',
+      'security-severity': confidenceToSecuritySeverity(confidence),
+      precision: confidenceToPrecision(confidence),
       ...(asyncRiskType && { asyncRiskType }),
       ...(category && { category }),
     },
@@ -364,17 +375,128 @@ function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * Enhance rule tags with GitHub-recognized semantic tags based on rule type.
+ * Ensures the tags array is clean and compliant.
+ */
+export function enhanceTagsWithGitHubSemantics(ruleId: string, baseTags: string[]): string[] {
+  const category = ISSUE_CATEGORY[ruleId];
+  const tags = [...baseTags];
+
+  if (
+    category === 'Security' ||
+    ruleId.includes('secret') ||
+    ruleId.includes('eval') ||
+    ruleId.includes('sql') ||
+    ruleId.includes('deserialize') ||
+    ruleId.includes('auth')
+  ) {
+    tags.push('security', 'correctness', 'reliability');
+  } else {
+    tags.push('correctness', 'reliability');
+  }
+
+  return sanitizeSarifTags(tags);
+}
+
+/**
+ * Centralized normalization layer to guarantee full GitHub Code Scanning compatibility.
+ * Matches all required mappings for security-severity, precision, and result levels.
+ */
+export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
+  const normalizedRuns = log.runs.map((run) => {
+    // 1. Normalize rules
+    const rules = run.tool.driver.rules.map((rule) => {
+      const confidence = ISSUE_CONFIDENCE[rule.id];
+      const properties = rule.properties || {};
+
+      // Map security-severity and precision
+      properties['security-severity'] = confidenceToSecuritySeverity(confidence);
+      properties['precision'] = confidenceToPrecision(confidence);
+
+      // Enhance tags with GitHub-recognized semantic tags
+      const currentTags = properties.tags || [];
+      properties.tags = enhanceTagsWithGitHubSemantics(rule.id, currentTags);
+
+      // Ensure deprecated problem.severity is not present
+      delete (properties as any)['problem.severity'];
+
+      // Ensure level is strictly error, warning, note
+      const defaultConfiguration = rule.defaultConfiguration || { level: 'warning' };
+      let normalizedConfigLevel = defaultConfiguration.level;
+      if (!['error', 'warning', 'note', 'none'].includes(normalizedConfigLevel)) {
+        normalizedConfigLevel = confidenceToSarifLevel(confidence);
+      }
+      if (normalizedConfigLevel === 'none') {
+        normalizedConfigLevel = 'note';
+      }
+
+      return {
+        ...rule,
+        defaultConfiguration: {
+          ...defaultConfiguration,
+          level: normalizedConfigLevel,
+        },
+        properties,
+      };
+    });
+
+    // 2. Normalize results
+    const results = run.results.map((result) => {
+      const confidence = ISSUE_CONFIDENCE[result.ruleId];
+      const properties = result.properties || {};
+
+      // Map security-severity and precision
+      properties['security-severity'] = confidenceToSecuritySeverity(confidence);
+      properties['precision'] = confidenceToPrecision(confidence);
+
+      // Normalize result level to strictly error, warning, or note
+      let normalizedLevel = result.level;
+      if (!['error', 'warning', 'note', 'none'].includes(normalizedLevel)) {
+        normalizedLevel = confidenceToSarifLevel(confidence);
+      }
+      if (normalizedLevel === 'none') {
+        normalizedLevel = 'note';
+      }
+
+      // Ensure actionable findings use kind "fail", informational hints use kind "informational"
+      const kind = confidence === 'informational' ? 'informational' : 'fail';
+
+      return {
+        ...result,
+        level: normalizedLevel,
+        kind,
+        properties,
+      };
+    });
+
+    return {
+      ...run,
+      tool: {
+        ...run.tool,
+        driver: {
+          ...run.tool.driver,
+          rules,
+        },
+      },
+      results,
+    };
+  });
+
+  return {
+    ...log,
+    runs: normalizedRuns,
+  };
+}
+
+/**
  * Convert a RunResult to a SARIF 2.1.0 log object.
  *
  * Only ai-guard findings are included. Ecosystem issues and parser errors
  * are excluded — they are not ai-guard findings and should not appear in
  * Code Scanning results.
  *
- * All output passes through the SARIF sanitizer to guarantee:
- *  - unique tags (GitHub Code Scanning schema requirement)
- *  - no undefined values in properties
- *  - valid level/kind/rank values
- *  - startLine >= 1
+ * All output passes through the SARIF sanitizer and central normalizer to guarantee
+ * full GitHub compatibility and schema-validity.
  */
 export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLog {
   const usedRuleIds = collectUsedRuleIds(result);
@@ -412,8 +534,8 @@ export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLo
     ],
   };
 
-  // Final sanitization pass — guarantees GitHub-compatible, schema-valid output
-  return sanitizeSarifLog(log);
+  // Final sanitization & normalization pass — guarantees GitHub-compatible, schema-valid output
+  return normalizeSarifForGitHub(sanitizeSarifLog(log));
 }
 
 /**
@@ -435,6 +557,17 @@ export interface SarifDebugInfo {
     confidence: string;
     category: string;
     level: string;
+    securitySeverity: string;
+    precision: string;
+  }>;
+  resultsEmitted: Array<{
+    ruleId: string;
+    level: string;
+    kind: string;
+    securitySeverity: string;
+    precision: string;
+    filePath: string;
+    line: number;
   }>;
   totalResults: number;
   version: string;
@@ -453,7 +586,7 @@ export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
     const category = ISSUE_CATEGORY[id] ?? 'AI Patterns';
     const categorySlug = category.toLowerCase().replace(/\s+/g, '-');
     const rawTags = [...(meta?.tags ?? ['ai-guard']), categorySlug];
-    const sanitizedTags = sanitizeSarifTags(rawTags);
+    const sanitizedTags = enhanceTagsWithGitHubSemantics(id, rawTags);
 
     return {
       id,
@@ -463,11 +596,30 @@ export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
       confidence: confidence ?? 'low',
       category,
       level: confidenceToSarifLevel(confidence),
+      securitySeverity: confidenceToSecuritySeverity(confidence),
+      precision: confidenceToPrecision(confidence),
     };
   });
 
+  const resultsEmitted: SarifDebugInfo['resultsEmitted'] = [];
+  for (const file of result.files) {
+    for (const issue of file.issues) {
+      const confidence = ISSUE_CONFIDENCE[issue.ruleId];
+      resultsEmitted.push({
+        ruleId: issue.ruleId,
+        level: confidenceToSarifLevel(confidence),
+        kind: confidence === 'informational' ? 'informational' : 'fail',
+        securitySeverity: confidenceToSecuritySeverity(confidence),
+        precision: confidenceToPrecision(confidence),
+        filePath: file.filePath,
+        line: issue.line,
+      });
+    }
+  }
+
   return {
     rulesEmitted,
+    resultsEmitted,
     totalResults: result.files.reduce((n, f) => n + f.issues.length, 0),
     version: PKG_VERSION,
   };
