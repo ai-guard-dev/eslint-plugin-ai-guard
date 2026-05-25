@@ -1,9 +1,10 @@
 import type { Command } from 'commander';
+import fs from 'fs';
 import ora from 'ora';
 import chalk from 'chalk';
 import { runEslint, type Preset, type EcosystemIssue } from '../utils/eslint-runner.js';
 import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, CONFIDENCE_TIER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
-import { buildSarifLog, sarifToJson } from '../utils/sarif.js';
+import { buildSarifLog, sarifToJson, buildSarifDebugInfo } from '../utils/sarif.js';
 import { emitGitHubAnnotations, writeGitHubSummary, writeGitHubOutputs } from '../utils/github-summary.js';
 import { isGitHubActions } from '../utils/git-diff.js';
 import type { RunResult } from '../utils/eslint-runner.js';
@@ -26,17 +27,21 @@ export function registerRunCommand(program: Command): void {
     .option('--verbose', 'Show all issues — disable grouping of repeated warnings')
     .option('--quiet', 'Only show errors — suppress warnings and informational hints')
     .option('--debug-timing', 'Print per-phase timing diagnostics')
+    .option('--debug-sarif', 'Print SARIF tag normalization trace — diagnose duplicate-tag schema issues')
+    .option('--sarif-output <file>', 'Write SARIF to this file instead of stdout')
     .action(async (opts: {
       path: string;
       strict?: boolean;
       security?: boolean;
       json?: boolean;
       sarif?: boolean;
+      sarifOutput?: string;
       failOn: string;
       maxWarnings?: number;
       verbose?: boolean;
       quiet?: boolean;
       debugTiming?: boolean;
+      debugSarif?: boolean;
     }) => {
       if (
         opts.maxWarnings !== undefined &&
@@ -111,9 +116,34 @@ export function registerRunCommand(program: Command): void {
 
       // ─── SARIF mode ─────────────────────────────────────────────────────────────────
 
-      if (opts.sarif) {
+      if (opts.sarif || opts.sarifOutput) {
         const sarifLog = buildSarifLog(result);
-        console.log(sarifToJson(sarifLog));
+        const sarifJson = sarifToJson(sarifLog);
+
+        // --debug-sarif: print tag normalization trace to stderr
+        if (opts.debugSarif) {
+          const debugInfo = buildSarifDebugInfo(result);
+          process.stderr.write('\n[debug-sarif] SARIF Tag Normalization Trace\n');
+          process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n');
+          for (const r of debugInfo.rulesEmitted) {
+            process.stderr.write(`[debug-sarif] ${r.id}\n`);
+            process.stderr.write(`[debug-sarif]   raw:       ${JSON.stringify(r.rawTags)}\n`);
+            process.stderr.write(`[debug-sarif]   sanitized: ${JSON.stringify(r.sanitizedTags)}\n`);
+            if (r.hasDuplicatesInRaw) {
+              process.stderr.write(`[debug-sarif]   ⚠ had duplicates — deduplicated\n`);
+            }
+          }
+          process.stderr.write('\n');
+        }
+
+        if (opts.sarifOutput) {
+          fs.writeFileSync(opts.sarifOutput, sarifJson, 'utf-8');
+          if (opts.debugSarif) {
+            process.stderr.write(`[debug-sarif] SARIF written to: ${opts.sarifOutput}\n`);
+          }
+        } else {
+          console.log(sarifJson);
+        }
         process.exit(resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
         return;
       }

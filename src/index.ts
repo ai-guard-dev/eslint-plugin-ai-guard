@@ -2,17 +2,27 @@ import { allRules } from './rules';
 import recommended from './configs/recommended';
 import strict from './configs/strict';
 import security from './configs/security';
-import fs from 'fs';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 import path from 'path';
 
-// Read version directly to avoid importing from cli/ (which breaks TS rootDir constraint)
-const pkgPath = path.resolve(__dirname, '../package.json');
+// Safely read version in both CJS and ESM environments
 let pkgVersion = '1.2.2'; // Fallback
 try {
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  if (pkg.version) pkgVersion = pkg.version;
+  // Use createRequire combined with import.meta.url for ESM compatibility
+  const require_ = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
+  
+  // Calculate path relative to the current file
+  const isESM = typeof __dirname === 'undefined';
+  const dirname = isESM ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+  
+  // Find package.json (works for both src/index.ts and dist/index.js/mjs)
+  const pkgPath = path.resolve(dirname, dirname.endsWith('src') ? '../package.json' : '../../package.json');
+  
+  const pkg = require_(pkgPath);
+  if (pkg && pkg.version) pkgVersion = pkg.version;
 } catch {
-  // Ignore
+  // Ignore and use fallback
 }
 
 const plugin = {

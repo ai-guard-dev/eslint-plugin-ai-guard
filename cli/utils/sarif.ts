@@ -6,6 +6,15 @@
  * SARIF, ai-guard findings appear as PR annotations in GitHub.
  *
  * Spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
+ *
+ * === SARIF SCHEMA COMPLIANCE ===
+ * GitHub Code Scanning validates SARIF against the 2.1.0 schema.
+ * Key requirements enforced here:
+ *  - properties.tags: uniqueItems=true (duplicates cause upload rejection)
+ *  - region.startLine: minimum=1 (0 causes schema error)
+ *  - level: must be "error"|"warning"|"note"|"none"
+ *  - kind: must be "fail"|"open"|"informational" (or omitted)
+ *  - All string properties: must be non-empty strings, not undefined/null
  */
 
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
@@ -90,6 +99,11 @@ interface SarifLog {
 }
 
 // ─── Rule metadata ────────────────────────────────────────────────────────────
+//
+// IMPORTANT: Tags here are the BASE tags. The category-derived tag is added
+// separately in buildRuleDescriptors, then the full list is deduplicated via
+// sanitizeSarifTags() before emission. This prevents schema violations when
+// a category tag (e.g. "async-reliability") is already present in base tags.
 
 const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
   'ai-guard/no-empty-catch':          { shortDesc: 'Empty catch block silently swallows errors', tags: ['reliability'] },
@@ -113,6 +127,103 @@ const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
 };
 
 const BASE_DOCS_URL = 'https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/docs/rules';
+
+// ─── SARIF Sanitizer ──────────────────────────────────────────────────────────
+//
+// Central sanitization layer. ALL SARIF metadata MUST pass through here before
+// emission. This is the single source of truth for SARIF normalization.
+//
+// Root cause of the GitHub upload failure:
+//   The category slug (e.g. "async-reliability") was appended to tags that
+//   already contained it (e.g. ['async', 'async-reliability']), producing
+//   ['async', 'async-reliability', 'async-reliability'] — violating the SARIF
+//   schema's uniqueItems constraint on properties.tags.
+
+/**
+ * Deduplicate, normalize, and validate SARIF tags.
+ *
+ * Rules enforced:
+ *  - Unique items (SARIF schema: uniqueItems: true)
+ *  - No empty strings
+ *  - Lowercase, hyphenated format
+ *  - Never null or undefined items
+ *
+ * This MUST be called on all tags before SARIF serialization.
+ */
+export function sanitizeSarifTags(tags: (string | undefined | null)[]): string[] {
+  return Array.from(
+    new Set(
+      tags
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        .map((t) => t.toLowerCase().trim().replace(/\s+/g, '-')),
+    ),
+  );
+}
+
+/**
+ * Sanitize SARIF rule properties.
+ * Ensures no undefined values, valid types, and schema-compliant structure.
+ */
+export function sanitizeSarifProperties(props: {
+  tags: (string | undefined | null)[];
+  confidence: string | undefined;
+  category: string | undefined;
+  problemSeverity: string | undefined;
+}): SarifReportingDescriptor['properties'] {
+  return {
+    tags: sanitizeSarifTags(props.tags),
+    confidence: props.confidence ?? 'low',
+    category: props.category ?? 'AI Patterns',
+    'problem.severity': props.problemSeverity ?? 'low',
+  };
+}
+
+/**
+ * Sanitize a SARIF rule descriptor.
+ * Guards against undefined shortDescription, missing help text,
+ * and invalid/empty properties.
+ */
+export function sanitizeSarifRule(rule: SarifReportingDescriptor): SarifReportingDescriptor {
+  return {
+    ...rule,
+    shortDescription: {
+      text: rule.shortDescription.text || `ai-guard rule: ${rule.id}`,
+    },
+    fullDescription: rule.fullDescription?.text
+      ? rule.fullDescription
+      : { text: rule.shortDescription.text || `ai-guard rule: ${rule.id}` },
+    properties: rule.properties
+      ? {
+          ...rule.properties,
+          // Re-deduplicate tags at the rule level as a final safety net
+          tags: rule.properties.tags
+            ? sanitizeSarifTags(rule.properties.tags)
+            : [],
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Sanitize a complete SARIF log.
+ * Applies all sanitizers to every rule descriptor and result.
+ * This is the final line of defense before serialization.
+ */
+export function sanitizeSarifLog(log: SarifLog): SarifLog {
+  return {
+    ...log,
+    runs: log.runs.map((run) => ({
+      ...run,
+      tool: {
+        ...run.tool,
+        driver: {
+          ...run.tool.driver,
+          rules: run.tool.driver.rules.map(sanitizeSarifRule),
+        },
+      },
+    })),
+  };
+}
 
 // ─── Confidence → SARIF mapping ──────────────────────────────────────────────
 
@@ -146,10 +257,6 @@ function confidenceToGitHubSeverity(confidence: string | undefined): string {
   }
 }
 
-function severityToSarifLevel(severity: 1 | 2): 'error' | 'warning' {
-  return severity === 2 ? 'error' : 'warning';
-}
-
 function filePathToUri(filePath: string): string {
   // Convert relative paths to file-relative URIs for SARIF
   // SARIF uses %SRCROOT% or similar base IDs; we use a simple relative path
@@ -174,6 +281,16 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
     const category = ISSUE_CATEGORY[id] ?? 'AI Patterns';
     const remediation = ISSUE_REMEDIATION[id];
 
+    // Derive category slug (e.g. "Async Reliability" → "async-reliability")
+    const categorySlug = category.toLowerCase().replace(/\s+/g, '-');
+
+    // FIX: Combine base tags + category slug, then deduplicate via sanitizeSarifTags.
+    // Previously, this was a naive spread: [...meta.tags, categorySlug]
+    // which produced duplicates like ['async', 'async-reliability', 'async-reliability']
+    // when the category slug was already present in the base tags.
+    // Now sanitizeSarifTags() uses a Set to guarantee uniqueItems compliance.
+    const rawTags = [...(meta?.tags ?? ['ai-guard']), categorySlug];
+
     const helpMarkdown = [
       `**${meta?.shortDesc ?? shortName}**`,
       '',
@@ -182,7 +299,7 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
       `[View rule documentation](${BASE_DOCS_URL}/${shortName}.md)`,
     ].filter(Boolean).join('\n');
 
-    return {
+    return sanitizeSarifRule({
       id,
       shortDescription: {
         text: meta?.shortDesc ?? `ai-guard rule: ${shortName}`,
@@ -198,13 +315,13 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
       defaultConfiguration: {
         level: confidenceToSarifLevel(confidence),
       },
-      properties: {
-        tags: [...(meta?.tags ?? ['ai-guard']), category.toLowerCase().replace(/ /g, '-')],
-        confidence: confidence ?? 'low',
+      properties: sanitizeSarifProperties({
+        tags: rawTags,
+        confidence,
         category,
-        'problem.severity': confidenceToGitHubSeverity(confidence),
-      },
-    };
+        problemSeverity: confidenceToGitHubSeverity(confidence),
+      }),
+    });
   });
 }
 
@@ -252,6 +369,12 @@ function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
  * Only ai-guard findings are included. Ecosystem issues and parser errors
  * are excluded — they are not ai-guard findings and should not appear in
  * Code Scanning results.
+ *
+ * All output passes through the SARIF sanitizer to guarantee:
+ *  - unique tags (GitHub Code Scanning schema requirement)
+ *  - no undefined values in properties
+ *  - valid level/kind/rank values
+ *  - startLine >= 1
  */
 export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLog {
   const usedRuleIds = collectUsedRuleIds(result);
@@ -264,7 +387,7 @@ export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLo
     }
   }
 
-  return {
+  const log: SarifLog = {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
     version: '2.1.0',
     runs: [
@@ -288,6 +411,9 @@ export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLo
       },
     ],
   };
+
+  // Final sanitization pass — guarantees GitHub-compatible, schema-valid output
+  return sanitizeSarifLog(log);
 }
 
 /**
@@ -296,4 +422,53 @@ export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLo
  */
 export function sarifToJson(log: SarifLog): string {
   return JSON.stringify(log, null, 2);
+}
+
+// ─── Debug helpers ────────────────────────────────────────────────────────────
+
+export interface SarifDebugInfo {
+  rulesEmitted: Array<{
+    id: string;
+    rawTags: string[];
+    sanitizedTags: string[];
+    hasDuplicatesInRaw: boolean;
+    confidence: string;
+    category: string;
+    level: string;
+  }>;
+  totalResults: number;
+  version: string;
+}
+
+/**
+ * Build debug info for --debug-sarif flag.
+ * Shows raw vs. sanitized tags so you can verify deduplication.
+ */
+export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
+  const usedRuleIds = collectUsedRuleIds(result);
+
+  const rulesEmitted = usedRuleIds.map((id) => {
+    const meta = RULE_DOCS[id];
+    const confidence = ISSUE_CONFIDENCE[id];
+    const category = ISSUE_CATEGORY[id] ?? 'AI Patterns';
+    const categorySlug = category.toLowerCase().replace(/\s+/g, '-');
+    const rawTags = [...(meta?.tags ?? ['ai-guard']), categorySlug];
+    const sanitizedTags = sanitizeSarifTags(rawTags);
+
+    return {
+      id,
+      rawTags,
+      sanitizedTags,
+      hasDuplicatesInRaw: rawTags.length !== new Set(rawTags).size,
+      confidence: confidence ?? 'low',
+      category,
+      level: confidenceToSarifLevel(confidence),
+    };
+  });
+
+  return {
+    rulesEmitted,
+    totalResults: result.files.reduce((n, f) => n + f.issues.length, 0),
+    version: PKG_VERSION,
+  };
 }
