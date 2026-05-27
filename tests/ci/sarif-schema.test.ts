@@ -27,6 +27,8 @@ import {
   sanitizeSarifRule,
   sanitizeSarifLog,
   buildSarifDebugInfo,
+  normalizeSarifPath,
+  debugSarifPath,
 } from '../../cli/utils/sarif.js';
 import type { RunResult } from '../../cli/utils/eslint-runner.js';
 
@@ -327,10 +329,13 @@ describe('SARIF structure validity (GitHub schema compliance)', () => {
     }
   });
 
-  it('artifactLocation uses %SRCROOT% uriBaseId', () => {
+  it('artifactLocation MUST NOT have uriBaseId (removed for GitHub Code Scanning compatibility)', () => {
+    // GitHub silently drops findings when %SRCROOT% is present because it
+    // cannot resolve custom base ID mappings in the runner environment.
+    // This test guards against regression where uriBaseId is re-introduced.
     const sarif = buildSarifLog(makeResult(['ai-guard/no-hardcoded-secret']));
     const loc = sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation;
-    expect(loc.uriBaseId).toBe('%SRCROOT%');
+    expect((loc as Record<string, unknown>).uriBaseId).toBeUndefined();
   });
 
   it('produces valid JSON string via sarifToJson', () => {
@@ -552,5 +557,141 @@ describe('GitHub Code Scanning compatibility', () => {
     const uri = sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri;
     expect(uri).not.toContain('\\');
     expect(uri).toContain('/');
+  });
+
+  it('artifact location MUST NOT contain uriBaseId (%SRCROOT% or any custom base)', () => {
+    // GitHub Code Scanning silently drops findings when uriBaseId is present
+    // because it cannot resolve custom base ID mappings in the runner environment.
+    const sarif = buildSarifLog(makeResult(ALL_RULES));
+    for (const result of sarif.runs[0].results) {
+      for (const loc of result.locations) {
+        expect(
+          (loc.physicalLocation.artifactLocation as Record<string, unknown>).uriBaseId,
+          `uriBaseId must be absent on rule ${result.ruleId}`,
+        ).toBeUndefined();
+      }
+    }
+  });
+
+  it('artifact URIs are repository-relative POSIX paths (no leading slash, no drive letter)', () => {
+    const sarif = buildSarifLog(makeResult(ALL_RULES));
+    for (const result of sarif.runs[0].results) {
+      const uri = result.locations[0].physicalLocation.artifactLocation.uri;
+      expect(uri, `URI must not start with / for ${result.ruleId}`).not.toMatch(/^\//);
+      expect(uri, `URI must not start with drive letter for ${result.ruleId}`).not.toMatch(/^[A-Za-z]:/);
+      expect(uri, `URI must not contain backslashes for ${result.ruleId}`).not.toContain('\\');
+      expect(uri, `URI must not start with ./ for ${result.ruleId}`).not.toMatch(/^\.\//); 
+    }
+  });
+
+  it('buildSarifDebugInfo includes normalizedUri in resultsEmitted', () => {
+    const result = makeResult(['ai-guard/no-floating-promise']);
+    const info = buildSarifDebugInfo(result);
+    expect(info.resultsEmitted[0]).toHaveProperty('normalizedUri');
+    expect(info.pathsDebug).toHaveLength(1);
+    expect(info.pathsDebug[0].isRepositoryRelative).toBe(true);
+  });
+});
+
+// ─── normalizeSarifPath unit tests ────────────────────────────────────────────
+
+describe('normalizeSarifPath', () => {
+  it('passes through clean relative POSIX paths unchanged', () => {
+    expect(normalizeSarifPath('src/server/api.ts')).toBe('src/server/api.ts');
+  });
+
+  it('converts Windows backslashes to forward slashes', () => {
+    expect(normalizeSarifPath('src\\server\\api.ts')).toBe('src/server/api.ts');
+  });
+
+  it('strips Windows drive letter and makes path relative', () => {
+    expect(normalizeSarifPath('C:/home/runner/work/repo/src/api.ts'))
+      .toBe('home/runner/work/repo/src/api.ts');
+  });
+
+  it('strips Windows drive letter from backslash paths', () => {
+    expect(normalizeSarifPath('C:\\Users\\runner\\work\\src\\file.ts'))
+      .toBe('Users/runner/work/src/file.ts');
+  });
+
+  it('strips repoRoot to produce a clean repository-relative path', () => {
+    const repoRoot = '/home/runner/work/my-repo/my-repo';
+    const absolute = '/home/runner/work/my-repo/my-repo/src/handler.ts';
+    expect(normalizeSarifPath(absolute, repoRoot)).toBe('src/handler.ts');
+  });
+
+  it('strips repoRoot with trailing slash', () => {
+    const repoRoot = '/home/runner/work/my-repo/my-repo/';
+    const absolute = '/home/runner/work/my-repo/my-repo/src/handler.ts';
+    expect(normalizeSarifPath(absolute, repoRoot)).toBe('src/handler.ts');
+  });
+
+  it('strips Windows-style absolute path using repoRoot', () => {
+    const repoRoot = 'C:\\Yash Projects\\ESLint AI Guard';
+    const absolute = 'C:\\Yash Projects\\ESLint AI Guard\\src\\utils\\sarif.ts';
+    expect(normalizeSarifPath(absolute, repoRoot)).toBe('src/utils/sarif.ts');
+  });
+
+  it('strips leading ./ from relative paths', () => {
+    expect(normalizeSarifPath('./src/api.ts')).toBe('src/api.ts');
+  });
+
+  it('strips leading / from absolute paths (no repoRoot)', () => {
+    expect(normalizeSarifPath('/src/api.ts')).toBe('src/api.ts');
+  });
+
+  it('returns non-empty string for empty input (safe fallback)', () => {
+    const result = normalizeSarifPath('');
+    expect(typeof result).toBe('string');
+  });
+
+  it('produces GitHub Code Scanning-compatible URIs (no backslash, no leading slash)', () => {
+    const cases = [
+      'src/server/api.ts',
+      'src\\server\\api.ts',
+      './src/server/api.ts',
+      '/src/server/api.ts',
+    ];
+    for (const input of cases) {
+      const uri = normalizeSarifPath(input);
+      expect(uri).not.toContain('\\');
+      expect(uri).not.toMatch(/^\//);
+      expect(uri).not.toMatch(/^\.\//); 
+    }
+  });
+});
+
+// ─── debugSarifPath unit tests ─────────────────────────────────────────────────
+
+describe('debugSarifPath', () => {
+  it('reports isRepositoryRelative=true for clean relative paths', () => {
+    const entry = debugSarifPath('src/api.ts');
+    expect(entry.isRepositoryRelative).toBe(true);
+    expect(entry.hasLeadingSlash).toBe(false);
+    expect(entry.hasBackslashes).toBe(false);
+    expect(entry.hasDriveLetter).toBe(false);
+    expect(entry.hasLeadingDotSlash).toBe(false);
+  });
+
+  it('reports isRepositoryRelative=false for absolute path without repoRoot', () => {
+    // After normalization, leading slash is stripped, so actually becomes relative.
+    // The entry originalPath is the original, normalizedUri is the result.
+    const entry = debugSarifPath('/home/runner/work/src/api.ts');
+    expect(entry.originalPath).toBe('/home/runner/work/src/api.ts');
+    expect(entry.normalizedUri).toBe('home/runner/work/src/api.ts');
+    expect(entry.isRepositoryRelative).toBe(true); // after stripping leading /
+  });
+
+  it('reports correct flags for Windows backslash paths', () => {
+    const entry = debugSarifPath('src\\windows\\file.ts');
+    expect(entry.normalizedUri).toBe('src/windows/file.ts');
+    expect(entry.isRepositoryRelative).toBe(true);
+  });
+
+  it('correctly strips repoRoot and reports repo-relative', () => {
+    const repoRoot = '/home/runner/work/my-repo/my-repo';
+    const entry = debugSarifPath('/home/runner/work/my-repo/my-repo/src/handler.ts', repoRoot);
+    expect(entry.normalizedUri).toBe('src/handler.ts');
+    expect(entry.isRepositoryRelative).toBe(true);
   });
 });

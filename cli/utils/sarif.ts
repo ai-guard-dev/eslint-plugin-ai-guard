@@ -15,19 +15,27 @@
  *  - level: must be "error"|"warning"|"note"|"none"
  *  - kind: must be "fail"|"open"|"informational" (or omitted)
  *  - All string properties: must be non-empty strings, not undefined/null
+ *
+ * === GITHUB CODE SCANNING PATH RESOLUTION ===
+ * GitHub resolves artifact URIs using simple repository-relative POSIX paths.
+ * DO NOT emit uriBaseId (%SRCROOT% or any custom base ID) — GitHub cannot
+ * resolve custom base mappings and will silently suppress all findings.
+ * Emit ONLY clean relative paths: "src/server/api.ts", never absolute paths,
+ * never Windows backslash paths, never drive letters, never leading "./".
  */
 
+import path from 'path';
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
 import { ISSUE_CONFIDENCE, ISSUE_CATEGORY, ISSUE_ASYNC_RISK_TYPE, ISSUE_REMEDIATION } from './eslint-runner.js';
-import { CONFIDENCE_TIER } from './logger.js';
 import { PKG_VERSION } from './version.js';
-import type { ConfidenceTier } from './logger.js';
 
 // ─── SARIF type definitions ────────────────────────────────────────────────────
 
 interface SarifArtifactLocation {
+  // uri MUST be a repository-relative POSIX path.
+  // DO NOT include uriBaseId — GitHub cannot resolve custom base ID mappings
+  // and will silently suppress all findings when %SRCROOT% is used.
   uri: string;
-  uriBaseId?: string;
 }
 
 interface SarifRegion {
@@ -271,10 +279,52 @@ function confidenceToRank(confidence: string | undefined): number {
   }
 }
 
-function filePathToUri(filePath: string): string {
-  // Convert relative paths to file-relative URIs for SARIF
-  // SARIF uses %SRCROOT% or similar base IDs; we use a simple relative path
-  return filePath.replace(/\\/g, '/');
+/**
+ * Convert a filesystem path to a GitHub Code Scanning-compatible
+ * repository-relative POSIX URI.
+ *
+ * GitHub resolves artifact locations using repository-relative POSIX paths
+ * without any uriBaseId mapping. This function ensures:
+ *  - Windows backslashes → forward slashes
+ *  - Drive letters (C:/) removed
+ *  - Absolute runner paths (/home/runner/work/.../repo/) stripped to relative
+ *  - Leading "./" removed (GitHub requires "src/file.ts" not "./src/file.ts")
+ *  - No uriBaseId emitted — GitHub does not need it
+ *
+ * @param filePath  - Relative path from the ESLint runner (already relative to cwd)
+ * @param repoRoot  - Optional absolute repo root for stripping absolute paths
+ */
+export function normalizeSarifPath(filePath: string, repoRoot?: string): string {
+  let normalized = filePath;
+
+  // 1. Normalize to POSIX separators
+  normalized = normalized.replace(/\\/g, '/');
+
+  // 2. Strip drive letter (Windows: C:/ → /)
+  normalized = normalized.replace(/^[A-Za-z]:\//, '/');
+
+  // 3. If an absolute path and repoRoot provided, make it relative
+  if (repoRoot && path.isAbsolute(filePath)) {
+    const posixRoot = repoRoot.replace(/\\/g, '/').replace(/^[A-Za-z]:\//, '/').replace(/\/$/, '');
+    if (normalized.startsWith(posixRoot + '/')) {
+      normalized = normalized.slice(posixRoot.length + 1);
+    } else if (normalized.startsWith(posixRoot)) {
+      normalized = normalized.slice(posixRoot.length);
+    }
+  }
+
+  // 4. Strip leading slash (absolute → relative)
+  normalized = normalized.replace(/^\/+/, '');
+
+  // 5. Strip leading ./
+  normalized = normalized.replace(/^\.\//, '');
+
+  // 6. Ensure non-empty result — fall back to original POSIX
+  if (!normalized || normalized === '.') {
+    normalized = filePath.replace(/\\/g, '/');
+  }
+
+  return normalized;
 }
 
 function collectUsedRuleIds(result: RunResult): string[] {
@@ -334,10 +384,14 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
   });
 }
 
-function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
+function buildSarifResult(issue: IssueDetail, file: FileResult, repoRoot?: string): SarifResult {
   const confidence = ISSUE_CONFIDENCE[issue.ruleId];
   const asyncRiskType = ISSUE_ASYNC_RISK_TYPE[issue.ruleId];
   const category = ISSUE_CATEGORY[issue.ruleId];
+
+  // Normalize path to repository-relative POSIX.
+  // CRITICAL: No uriBaseId — GitHub resolves repo-relative paths directly.
+  const sarifUri = normalizeSarifPath(file.filePath, repoRoot);
 
   return {
     ruleId: issue.ruleId,
@@ -349,8 +403,8 @@ function buildSarifResult(issue: IssueDetail, file: FileResult): SarifResult {
       {
         physicalLocation: {
           artifactLocation: {
-            uri: filePathToUri(file.filePath),
-            uriBaseId: '%SRCROOT%',
+            // Repository-relative POSIX path — no uriBaseId
+            uri: sarifUri,
           },
           region: {
             startLine: Math.max(1, issue.line),
@@ -497,15 +551,26 @@ export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
  *
  * All output passes through the SARIF sanitizer and central normalizer to guarantee
  * full GitHub compatibility and schema-validity.
+ *
+ * @param result    - The ESLint run result
+ * @param version   - Tool version string (defaults to PKG_VERSION)
+ * @param repoRoot  - Optional absolute repo root used to produce repository-relative
+ *                    artifact URIs. When running in GitHub Actions, pass the
+ *                    GITHUB_WORKSPACE env var so runner-absolute paths are stripped
+ *                    to clean relative paths that GitHub can resolve.
  */
-export function buildSarifLog(result: RunResult, version = PKG_VERSION): SarifLog {
+export function buildSarifLog(
+  result: RunResult,
+  version = PKG_VERSION,
+  repoRoot?: string,
+): SarifLog {
   const usedRuleIds = collectUsedRuleIds(result);
   const rules = buildRuleDescriptors(usedRuleIds);
 
   const sarifResults: SarifResult[] = [];
   for (const file of result.files) {
     for (const issue of file.issues) {
-      sarifResults.push(buildSarifResult(issue, file));
+      sarifResults.push(buildSarifResult(issue, file, repoRoot));
     }
   }
 
@@ -548,6 +613,16 @@ export function sarifToJson(log: SarifLog): string {
 
 // ─── Debug helpers ────────────────────────────────────────────────────────────
 
+export interface SarifPathDebugEntry {
+  originalPath: string;
+  normalizedUri: string;
+  isRepositoryRelative: boolean;
+  hasLeadingSlash: boolean;
+  hasDriveLetter: boolean;
+  hasBackslashes: boolean;
+  hasLeadingDotSlash: boolean;
+}
+
 export interface SarifDebugInfo {
   rulesEmitted: Array<{
     id: string;
@@ -567,17 +642,36 @@ export interface SarifDebugInfo {
     securitySeverity: string;
     precision: string;
     filePath: string;
+    normalizedUri: string;
     line: number;
   }>;
+  pathsDebug: SarifPathDebugEntry[];
   totalResults: number;
   version: string;
 }
 
 /**
- * Build debug info for --debug-sarif flag.
- * Shows raw vs. sanitized tags so you can verify deduplication.
+ * Introspect a file path and return a debug entry showing exactly what
+ * normalization will be applied before SARIF emission.
  */
-export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
+export function debugSarifPath(filePath: string, repoRoot?: string): SarifPathDebugEntry {
+  const normalizedUri = normalizeSarifPath(filePath, repoRoot);
+  return {
+    originalPath: filePath,
+    normalizedUri,
+    isRepositoryRelative: !path.isAbsolute(normalizedUri) && !normalizedUri.startsWith('/'),
+    hasLeadingSlash: normalizedUri.startsWith('/'),
+    hasDriveLetter: /^[A-Za-z]:/.test(normalizedUri),
+    hasBackslashes: normalizedUri.includes('\\'),
+    hasLeadingDotSlash: normalizedUri.startsWith('./'),
+  };
+}
+
+/**
+ * Build debug info for --debug-sarif and --debug-sarif-paths flags.
+ * Shows raw vs. sanitized tags, path normalization trace, and result metadata.
+ */
+export function buildSarifDebugInfo(result: RunResult, repoRoot?: string): SarifDebugInfo {
   const usedRuleIds = collectUsedRuleIds(result);
 
   const rulesEmitted = usedRuleIds.map((id) => {
@@ -602,7 +696,16 @@ export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
   });
 
   const resultsEmitted: SarifDebugInfo['resultsEmitted'] = [];
+  const pathsDebug: SarifPathDebugEntry[] = [];
+  const seenPaths = new Set<string>();
+
   for (const file of result.files) {
+    // Path debug entry — one per unique file path
+    if (!seenPaths.has(file.filePath)) {
+      seenPaths.add(file.filePath);
+      pathsDebug.push(debugSarifPath(file.filePath, repoRoot));
+    }
+
     for (const issue of file.issues) {
       const confidence = ISSUE_CONFIDENCE[issue.ruleId];
       resultsEmitted.push({
@@ -612,6 +715,7 @@ export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
         securitySeverity: confidenceToSecuritySeverity(confidence),
         precision: confidenceToPrecision(confidence),
         filePath: file.filePath,
+        normalizedUri: normalizeSarifPath(file.filePath, repoRoot),
         line: issue.line,
       });
     }
@@ -620,6 +724,7 @@ export function buildSarifDebugInfo(result: RunResult): SarifDebugInfo {
   return {
     rulesEmitted,
     resultsEmitted,
+    pathsDebug,
     totalResults: result.files.reduce((n, f) => n + f.issues.length, 0),
     version: PKG_VERSION,
   };

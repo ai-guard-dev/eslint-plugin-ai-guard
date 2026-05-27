@@ -73,7 +73,9 @@ describe('SARIF output', () => {
     expect(location.region.startColumn).toBe(3);
     expect(location.region.endLine).toBe(5);
     expect(location.region.endColumn).toBe(25);
-    expect(location.artifactLocation.uriBaseId).toBe('%SRCROOT%');
+    // uriBaseId MUST be absent — GitHub Code Scanning cannot resolve custom base IDs.
+    // Presence of %SRCROOT% causes GitHub to silently drop all findings from Code Scanning.
+    expect((location.artifactLocation as Record<string, unknown>).uriBaseId).toBeUndefined();
   });
 
   it('maps warnings to SARIF warning level', () => {

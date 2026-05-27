@@ -61,7 +61,8 @@ export function registerChangedCommand(program: Command): void {
     .option('--debug-timing', 'Print per-phase timing diagnostics')
     .option('--debug-git', 'Print full git resolution trace (useful for diagnosing zero-file issues)')
     .option('--debug-ci', 'Print CI environment state (GITHUB_* vars, SARIF path, summary path)')
-    .option('--debug-sarif', 'Print SARIF tag normalization trace — diagnose duplicate-tag schema issues')
+    .option('--debug-sarif', 'Print SARIF tag/level normalization trace — diagnose schema issues')
+    .option('--debug-sarif-paths', 'Print path normalization trace — diagnose GitHub Code Scanning path resolution')
     .action(async (opts: {
       pr?: boolean;
       staged?: boolean;
@@ -82,6 +83,7 @@ export function registerChangedCommand(program: Command): void {
       debugGit?: boolean;
       debugCi?: boolean;
       debugSarif?: boolean;
+      debugSarifPaths?: boolean;
     }) => {
       const preset: Preset = opts.strict ? 'strict' : opts.security ? 'security' : 'recommended';
       const inCI = isGitHubActions();
@@ -235,6 +237,7 @@ function handleResults(
     preset?: string;
     debugGit?: boolean;
     debugSarif?: boolean;
+    debugSarifPaths?: boolean;
   },
   preset: string,
   scanMode: 'full' | 'changed' | 'staged',
@@ -251,12 +254,14 @@ function handleResults(
 
   // ── SARIF mode ─────────────────────────────────────────────────────────────
   if (opts.sarif) {
-    const sarifLog = buildSarifLog(result);
+    // Resolve repo root — in GitHub Actions GITHUB_WORKSPACE is the checkout root.
+    const repoRoot = process.env.GITHUB_WORKSPACE ?? undefined;
+    const sarifLog = buildSarifLog(result, undefined, repoRoot);
     const sarifJson = sarifToJson(sarifLog);
 
     // --debug-sarif: print SARIF metadata and tag trace to stderr
     if (opts.debugSarif) {
-      const debugInfo = buildSarifDebugInfo(result);
+      const debugInfo = buildSarifDebugInfo(result, repoRoot);
       process.stderr.write('\n[debug-sarif] SARIF GitHub Compatibility Trace\n');
       process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n');
       process.stderr.write('[debug-sarif] Rules Emitted:\n');
@@ -282,9 +287,33 @@ function handleResults(
           process.stderr.write(`[debug-sarif]     kind:              ${res.kind}\n`);
           process.stderr.write(`[debug-sarif]     security-severity: ${res.securitySeverity}\n`);
           process.stderr.write(`[debug-sarif]     precision:         ${res.precision}\n`);
+          process.stderr.write(`[debug-sarif]     artifact uri:      ${res.normalizedUri}\n`);
         }
       }
       process.stderr.write('[debug-sarif] ─────────────────────────────────────────\n\n');
+    }
+
+    // --debug-sarif-paths: print path normalization trace to stderr
+    if (opts.debugSarifPaths) {
+      const debugInfo = buildSarifDebugInfo(result, repoRoot);
+      process.stderr.write('\n[debug-sarif-paths] Path Normalization Trace\n');
+      process.stderr.write('[debug-sarif-paths] ─────────────────────────────────────────\n');
+      process.stderr.write(`[debug-sarif-paths] GITHUB_WORKSPACE: ${repoRoot ?? '(not set — local run)'}\n\n`);
+      if (debugInfo.pathsDebug.length === 0) {
+        process.stderr.write('[debug-sarif-paths]   (no files in results)\n');
+      } else {
+        for (const p of debugInfo.pathsDebug) {
+          process.stderr.write(`[debug-sarif-paths]   original path:   ${p.originalPath}\n`);
+          process.stderr.write(`[debug-sarif-paths]   artifact uri:    ${p.normalizedUri}\n`);
+          process.stderr.write(`[debug-sarif-paths]   repo-relative:   ${p.isRepositoryRelative ? '✅ yes' : '❌ NO (GitHub may miss this)'}\n`);
+          if (p.hasBackslashes)   process.stderr.write('[debug-sarif-paths]   ⚠ had backslashes — converted\n');
+          if (p.hasDriveLetter)   process.stderr.write('[debug-sarif-paths]   ⚠ had drive letter — stripped\n');
+          if (p.hasLeadingSlash)  process.stderr.write('[debug-sarif-paths]   ⚠ had leading slash — stripped\n');
+          if (p.hasLeadingDotSlash) process.stderr.write('[debug-sarif-paths]   ⚠ had leading ./ — stripped\n');
+          process.stderr.write('\n');
+        }
+      }
+      process.stderr.write('[debug-sarif-paths] ─────────────────────────────────────────\n\n');
     }
 
     // Write to file if a path was resolved (CI default or explicit --sarif-output)
