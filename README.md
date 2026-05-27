@@ -32,7 +32,7 @@ npx ai-guard run
 npx ai-guard changed --sarif --sarif-output results.sarif
 ```
 
-> [SCREENSHOT PLACEHOLDER — GitHub PR annotation showing ai-guard finding on a floating promise]
+  <img src="./assets/ss1.jpg" alt="AI Guard Logo" width="80" />
 
 ---
 
@@ -137,11 +137,11 @@ This produces:
 - ✅ Persistent alerts in `Security → Code scanning`
 - ✅ PR status check that blocks merges on high-severity findings
 
-> [SCREENSHOT PLACEHOLDER — GitHub Advanced Security summary showing ai-guard findings]
+  <img src="./assets/ss1.jpg" alt="AI Guard Logo" width="80" />
 
-> [SCREENSHOT PLACEHOLDER — GitHub Code Scanning view with persistent ai-guard alerts]
+  <img src="./assets/ss2.jpg" alt="AI Guard Logo" width="80" />
 
-> [SCREENSHOT PLACEHOLDER — PR check failing due to high-severity ai-guard finding]
+  <img src="./assets/ss6.jpg" alt="AI Guard Logo" width="80" />
 
 See [`docs/github-actions.md`](./docs/github-actions.md) for the complete workflow reference
 including full-scan mode, baseline mode, and SARIF debugging.
