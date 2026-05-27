@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-ai-guard",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "description": "GitHub-native guardrails for AI-generated code. ESLint plugin and GitHub Action for detecting async reliability issues, floating promises, empty catch blocks, hardcoded secrets, SQL injection, and more. SARIF-based GitHub Code Scanning integration with PR annotations and persistent security alerts.",
   "keywords": [
     "eslint",
