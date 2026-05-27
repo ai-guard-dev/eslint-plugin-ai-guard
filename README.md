@@ -32,7 +32,7 @@ npx ai-guard run
 npx ai-guard changed --sarif --sarif-output results.sarif
 ```
 
-  <img src="./assets/ss1.jpg" alt="AI Guard Screenshot" width="320" />
+  <img src="./assets/ss1.jpg" alt="AI Guard Screenshot" width="500" />
 
 ---
 
@@ -137,11 +137,11 @@ This produces:
 - ✅ Persistent alerts in `Security → Code scanning`
 - ✅ PR status check that blocks merges on high-severity findings
 
-  <img src="./assets/ss1.jpg" alt="AI Guard Screenshot" width="320" />
+  <img src="./assets/ss1.jpg" alt="AI Guard Screenshot" width="500" />
 
-  <img src="./assets/ss2.jpg" alt="AI Guard Screenshot" width="320" />
+  <img src="./assets/ss2.jpg" alt="AI Guard Screenshot" width="500" />
 
-  <img src="./assets/ss6.jpg" alt="AI Guard Screenshot" width="320" />
+  <img src="./assets/ss6.jpg" alt="AI Guard Screenshot" width="500" />
 
 See [`docs/github-actions.md`](./docs/github-actions.md) for the complete workflow reference
 including full-scan mode, baseline mode, and SARIF debugging.
