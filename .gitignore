@@ -28,3 +28,5 @@ test-sample.tsx
 *.tgz
 .vscode/
 tmp-test-project/
+docs/archive/ai-guard-report.html
+*.tgz
