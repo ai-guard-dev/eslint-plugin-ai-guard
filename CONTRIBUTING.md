@@ -1,17 +1,39 @@
 # Contributing to eslint-plugin-ai-guard
 
-Thank you for taking the time to contribute! This document explains how to report issues, suggest new rules, and submit pull requests.
+Thank you for contributing! This guide covers everything from reporting issues to shipping
+new rules and fixing bugs.
+
+---
+
+## Table of Contents
+
+- [Project Philosophy](#project-philosophy)
+- [Reporting Bugs](#reporting-bugs)
+- [Suggesting New Rules](#suggesting-new-rules)
+- [Development Setup](#development-setup)
+- [Adding a New Rule](#adding-a-new-rule)
+- [Testing](#testing)
+- [SARIF Validation](#sarif-validation)
+- [GitHub Workflow Validation](#github-workflow-validation)
+- [Release Flow](#release-flow)
+- [Commit Conventions](#commit-conventions)
+- [Code Style](#code-style)
+- [Pull Request Process](#pull-request-process)
 
 ---
 
 ## Project Philosophy
 
-Before contributing, please understand our core values:
+Before contributing, understand our core values:
 
-1. **Precision over recall** — we tolerate missing some bugs rather than creating noise
-2. **Low false positives** — if a rule fires on valid, idiomatic code too often, it should be weakened or disabled in `recommended`
-3. **Gradual adoption** — `recommended` must be safe for day-one use; controversial rules belong in `strict`
-4. **AI-specific focus** — only rules that target patterns AI tools specifically get wrong
+1. **Precision over recall** — missing a bug is acceptable; false positives are not
+2. **Low false positives** — a rule that fires on valid, idiomatic code 10%+ of the time
+   gets weakened or moved to `strict`
+3. **Gradual adoption** — `recommended` must be safe for day-one use on any codebase
+4. **AI-specific focus** — rules should target patterns that AI tools specifically generate
+   more than humans do
+5. **GitHub-native** — SARIF, Code Scanning, PR annotations are first-class, not afterthoughts
+6. **Self-validating** — ai-guard scans its own source code with the strict preset in CI
 
 ---
 
@@ -22,13 +44,14 @@ Open an issue with:
 - Which rule fired (or should have fired)
 - The preset you're using (`recommended`, `strict`, `security`)
 - Your ESLint and Node.js versions
+- Whether you can reproduce it with `npx ai-guard run`
 
-For **false positives** (rule fires on valid code), please include:
+**For false positives** — a rule firing on valid code — include:
 - The exact code pattern
 - Why it's valid (e.g., intentional fire-and-forget, retry pattern)
-- Whether an inline suppression (`// eslint-disable-next-line ai-guard/rule-name`) works as a workaround
+- Whether `// eslint-disable-next-line ai-guard/rule-name` works as a workaround
 
-We take false positives very seriously. A rule that fires on valid code 10%+ of the time will be removed from `recommended`.
+We take false positives seriously. If a rule is too noisy, we disable it in `recommended`.
 
 ---
 
@@ -37,9 +60,10 @@ We take false positives very seriously. A rule that fires on valid code 10%+ of 
 Before opening a PR for a new rule, open a **rule request issue** with:
 
 1. **The AI anti-pattern** — paste a real example from Copilot/Claude/Cursor/Gemini
-2. **Why it's AI-specific** — why is this pattern more common in AI-generated code than human code?
+2. **Why it's AI-specific** — why is this more common in AI-generated code than human code?
 3. **False positive estimate** — how often would this fire on valid, idiomatic code?
-4. **Existing coverage** — does `@typescript-eslint/eslint-plugin`, `eslint-plugin-promise`, or core ESLint already cover this?
+4. **Existing coverage** — does `@typescript-eslint/eslint-plugin`, `eslint-plugin-promise`,
+   or core ESLint already cover this?
 
 We'll respond with `approved` or `declined` before you write code.
 
@@ -51,11 +75,21 @@ We'll respond with `approved` or `declined` before you write code.
 git clone https://github.com/YashJadhav21/eslint-plugin-ai-guard.git
 cd eslint-plugin-ai-guard
 npm install
-npm run test          # Run all tests
-npm run typecheck     # TypeScript check
-npm run build         # Build bundles
-npm run lint:self     # Scan own source with ai-guard
+
+# Run the test suite (667 tests)
+npm run test
+
+# TypeScript strict check (must always pass)
+npm run typecheck
+
+# Build CJS + ESM bundles
+npm run build
+
+# Scan own source with ai-guard (eats our own dog food)
+npm run lint:self
 ```
+
+All four commands must pass before any PR is mergeable.
 
 ---
 
@@ -64,13 +98,22 @@ npm run lint:self     # Scan own source with ai-guard
 ### 1. Create the rule file
 
 ```bash
-# Example: adding a new AI pattern rule
+# Async rules
+touch src/rules/async/no-your-rule.ts
+
+# Reliability (error handling)
+touch src/rules/reliability/no-your-rule.ts
+
+# Security
+touch src/rules/security/no-your-rule.ts
+
+# AI-specific patterns
 touch src/rules/ai-patterns/no-your-rule.ts
 ```
 
-Use the existing rules as templates. Every rule must:
+Use an existing rule as a template. Every rule must:
 - Use `ESLintUtils.RuleCreator` with the correct docs URL
-- Have a `type`, `docs.description`, and `messages` in `meta`
+- Have `type`, `docs.description`, and `messages` in `meta`
 - Export a named const AND a default export
 - Include AI context in the description (why AI generates this pattern)
 
@@ -81,10 +124,10 @@ touch tests/rules/no-your-rule.test.ts
 ```
 
 Tests must:
-- Import from `../helpers/rule-tester` (not declare their own RuleTester)
+- Import from `../helpers/rule-tester` (never re-declare `RuleTester`)
 - Have **at least 8 valid cases** covering edge cases and false-positive scenarios
 - Have **at least 8 invalid cases** covering real AI-generated patterns
-- Cover intentional suppression patterns where relevant
+- Have `output` on every `invalid` case if the rule has an autofix
 
 ```typescript
 import { ruleTester } from '../helpers/rule-tester';
@@ -92,69 +135,179 @@ import { noYourRule } from '../../src/rules/ai-patterns/no-your-rule';
 
 ruleTester.run('no-your-rule', noYourRule, {
   valid: [
-    // 8+ cases
+    // 8+ cases covering false-positive scenarios
   ],
   invalid: [
-    // 8+ cases
+    // 8+ cases covering real AI-generated patterns
   ],
 });
 ```
 
-### 3. Register the rule
+### 3. Register in 5 places
 
-Add to `src/rules/index.ts`:
 ```typescript
+// src/rules/index.ts
 import { noYourRule } from './ai-patterns/no-your-rule';
-
 export const allRules = {
   // ...existing
   'no-your-rule': noYourRule,
 };
+
+// src/configs/recommended.ts  — start with 'warn' or 'off'
+// src/configs/strict.ts        — typically 'error'
+// cli/utils/eslint-runner.ts   — add to preset rule maps
+// cli/utils/sarif.ts           — add to RULE_DOCS with shortDesc and tags
 ```
 
-### 4. Add to configs
-
-- `src/configs/recommended.ts` — decide the severity (start with `'warn'` or `'off'`)
-- `src/configs/strict.ts` — typically `'error'`
-- `cli/utils/eslint-runner.ts` — add to preset maps
-- `cli/commands/report.ts` — add to `RULE_META`
-- `cli/utils/logger.ts` — add to `RULE_CATEGORY`
-
-### 5. Write documentation
+### 4. Write rule documentation
 
 ```bash
 touch docs/rules/no-your-rule.md
 ```
 
-Follow the structure of an existing rule doc (see `docs/rules/no-dead-branch.md`).
+Follow the structure of an existing rule doc (e.g., `docs/rules/no-floating-promise.md`).
+Every rule doc must include: problem description, why AI generates it, bad example,
+good example, severity level, and workflow/CI implications.
 
-### 6. Run validation
+### 5. Run full validation
 
 ```bash
-npm run typecheck    # Must pass
-npm run test         # Must pass (all existing + your new tests)
-npm run build        # Must pass
-npm run lint:self    # Should show 0 errors (we eat our own dog food)
+npm run typecheck    # Zero errors required
+npm run test         # All tests must pass
+npm run build        # Build must succeed
+npm run lint:self    # Zero ai-guard errors on our own source
 ```
+
+---
+
+## Testing
+
+### Running tests
+
+```bash
+npm run test              # Run all 667 tests
+npm run test:watch        # Watch mode for development
+```
+
+### Test structure
+
+| Directory | Purpose |
+|-----------|---------|
+| `tests/rules/` | Rule valid/invalid cases via `@typescript-eslint/rule-tester` |
+| `tests/cli/` | CLI commands, SARIF output, fail-on logic, JSON output |
+| `tests/ci/` | SARIF schema compliance, persistence, GitHub env detection |
+| `tests/integration/` | End-to-end scans of Express and Next.js apps |
+
+### Writing tests for SARIF output
+
+If your change touches `cli/utils/sarif.ts`, add regression tests in `tests/ci/sarif-schema.test.ts`
+or `tests/ci/sarif-persistence.test.ts`. Key invariants that must never regress:
+
+- `automationDetails.id` must be `"ai-guard"` forever
+- `partialFingerprints["ai-guard/v1"]` must be a 64-char SHA-256 hex on every result
+- No `uriBaseId` in any `artifactLocation`
+- All artifact URIs must be repository-relative POSIX paths
+
+---
+
+## SARIF Validation
+
+To validate SARIF output locally:
+
+```bash
+# Generate SARIF
+node dist/cli/index.js run --path src --sarif --sarif-output /tmp/test.sarif
+
+# Debug path normalization
+node dist/cli/index.js run --path src --sarif --debug-sarif-paths
+
+# Debug persistence identity
+node dist/cli/index.js run --path src --sarif --debug-sarif-persistence
+
+# Validate schema compliance
+npm run test -- tests/ci/sarif-schema.test.ts
+npm run test -- tests/ci/sarif-persistence.test.ts
+```
+
+---
+
+## GitHub Workflow Validation
+
+The self-scan workflow (`ai-guard-example.yml`) runs on a schedule. To validate workflow
+changes without waiting for the schedule:
+
+1. Push your branch
+2. Go to Actions → "AI Guard Self-Scan"
+3. Click "Run workflow"
+4. Check the SARIF upload and Code Scanning results
+
+If SARIF findings don't appear in Code Scanning, use `--debug-sarif-persistence` in the
+workflow step to diagnose the issue.
+
+---
+
+## Release Flow
+
+Releases are automated via the `release.yml` workflow. To cut a release:
+
+```bash
+# Patch release (bug fixes)
+npm version patch
+
+# Minor release (new features)
+npm version minor
+
+# Major release (breaking changes)
+npm version major
+
+# Then publish (runs typecheck + test + lint + build automatically)
+npm publish
+```
+
+**Before releasing:**
+- Update `CHANGELOG.md` with the changes
+- Ensure all tests pass: `npm run test`
+- Ensure typecheck passes: `npm run typecheck`
+- Ensure the build passes: `npm run build`
+
+---
+
+## Commit Conventions
+
+We use conventional commits:
+
+```
+feat: add no-your-rule for detecting X pattern
+fix: false positive in no-floating-promise for retry patterns
+docs: add GitHub Actions integration guide
+test: add persistence regression tests for SARIF fingerprints
+chore: update dependencies
+refactor: centralize SARIF path normalization
+```
+
+Commit message format: `<type>: <description>` (lowercase, no trailing period).
 
 ---
 
 ## Code Style
 
-- TypeScript strict mode — no `any` without a comment explaining why
-- No external runtime dependencies (zero dep plugin is a feature)
-- Prefer explicit type annotations on exported functions
-- All new code passes `tsc --noEmit`
+- TypeScript strict mode — no `any` without an explanatory comment
+- No external runtime dependencies beyond the existing ones (zero-dep plugin is a feature)
+- Explicit return type annotations on all exported functions
+- All new code must pass `tsc --noEmit` with zero errors
+- Error messages in rules should clearly explain: what the issue is, why it matters,
+  and what to do instead
 
 ---
 
 ## Pull Request Process
 
 1. Open an issue first for non-trivial changes
-2. Branch from `main` with a descriptive name: `feat/no-your-rule` or `fix/false-positive-no-empty-catch`
+2. Branch from `main`: `feat/no-your-rule` or `fix/false-positive-no-empty-catch`
 3. Ensure all checks pass: `typecheck`, `test`, `build`, `lint:self`
 4. Update `CHANGELOG.md` with your change
-5. PRs must include tests — no tests, no merge
+5. PRs require tests — no tests, no merge
+6. If your change touches SARIF generation, include SARIF regression tests
 
 ---
 
