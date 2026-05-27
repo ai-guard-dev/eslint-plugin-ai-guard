@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Every Monday at 6am UTC
 
+permissions:
+  # Required for github/codeql-action/upload-sarif
+  security-events: write
+  contents: read
+
 jobs:
   ai-guard-scan:
     name: Self-Scan (plugin source)
@@ -21,8 +26,26 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run build
-      - name: Scan own source with AI Guard
-        run: node dist/cli/index.js run --path src --strict
+
+      - name: Scan own source with AI Guard (SARIF)
+        run: |
+          node dist/cli/index.js run \
+            --path src \
+            --strict \
+            --sarif \
+            --sarif-output ai-guard-results.sarif \
+            --fail-on none
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ai-guard-results.sarif
+          # category MUST remain "ai-guard" — stable across all runs.
+          # This links uploads to a persistent Code Scanning analysis slot,
+          # making findings visible in Security → Code scanning.
+          category: ai-guard
+
       - name: Generate HTML report
         run: node dist/cli/index.js report --path src --no-open --output ai-guard-self-report.html
       - name: Upload report

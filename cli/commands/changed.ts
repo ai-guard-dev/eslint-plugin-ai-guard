@@ -63,6 +63,7 @@ export function registerChangedCommand(program: Command): void {
     .option('--debug-ci', 'Print CI environment state (GITHUB_* vars, SARIF path, summary path)')
     .option('--debug-sarif', 'Print SARIF tag/level normalization trace — diagnose schema issues')
     .option('--debug-sarif-paths', 'Print path normalization trace — diagnose GitHub Code Scanning path resolution')
+    .option('--debug-sarif-persistence', 'Print persistence identity trace — fingerprints, automationDetails, category')
     .action(async (opts: {
       pr?: boolean;
       staged?: boolean;
@@ -84,6 +85,7 @@ export function registerChangedCommand(program: Command): void {
       debugCi?: boolean;
       debugSarif?: boolean;
       debugSarifPaths?: boolean;
+      debugSarifPersistence?: boolean;
     }) => {
       const preset: Preset = opts.strict ? 'strict' : opts.security ? 'security' : 'recommended';
       const inCI = isGitHubActions();
@@ -238,6 +240,7 @@ function handleResults(
     debugGit?: boolean;
     debugSarif?: boolean;
     debugSarifPaths?: boolean;
+    debugSarifPersistence?: boolean;
   },
   preset: string,
   scanMode: 'full' | 'changed' | 'staged',
@@ -314,6 +317,28 @@ function handleResults(
         }
       }
       process.stderr.write('[debug-sarif-paths] ─────────────────────────────────────────\n\n');
+    }
+
+    // --debug-sarif-persistence: print stable identity components to stderr
+    if (opts.debugSarifPersistence) {
+      const debugInfo = buildSarifDebugInfo(result, repoRoot);
+      process.stderr.write('\n[debug-sarif-persistence] GitHub Persistence Identity Trace\n');
+      process.stderr.write('[debug-sarif-persistence] ─────────────────────────────────────────\n');
+      process.stderr.write(`[debug-sarif-persistence] automationDetails.id: ${debugInfo.automationId}\n`);
+      process.stderr.write(`[debug-sarif-persistence] fingerprintKey:        ${debugInfo.fingerprintKey}\n`);
+      process.stderr.write(`[debug-sarif-persistence] GITHUB_WORKSPACE:      ${repoRoot ?? '(not set)'}\n`);
+      process.stderr.write(`[debug-sarif-persistence] totalResults:          ${debugInfo.totalResults}\n\n`);
+      if (debugInfo.resultsEmitted.length === 0) {
+        process.stderr.write('[debug-sarif-persistence]   (no findings — no fingerprints to show)\n');
+      } else {
+        process.stderr.write('[debug-sarif-persistence] Fingerprints (stable identity per finding):\n');
+        for (const res of debugInfo.resultsEmitted) {
+          process.stderr.write(`[debug-sarif-persistence]   ─ ${res.ruleId}\n`);
+          process.stderr.write(`[debug-sarif-persistence]     file:        ${res.normalizedUri}:${res.line}\n`);
+          process.stderr.write(`[debug-sarif-persistence]     fingerprint: ${res.fingerprint}\n`);
+        }
+      }
+      process.stderr.write('[debug-sarif-persistence] ─────────────────────────────────────────\n\n');
     }
 
     // Write to file if a path was resolved (CI default or explicit --sarif-output)

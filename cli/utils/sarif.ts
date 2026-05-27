@@ -22,8 +22,24 @@
  * resolve custom base mappings and will silently suppress all findings.
  * Emit ONLY clean relative paths: "src/server/api.ts", never absolute paths,
  * never Windows backslash paths, never drive letters, never leading "./".
+ *
+ * === GITHUB CODE SCANNING PERSISTENCE ===
+ * For findings to persist as repository-level alerts (not transient PR snapshots),
+ * GitHub requires three stable identity anchors in every upload:
+ *
+ *  1. automationDetails.id  — stable tool identifier; groups scan runs together
+ *                             MUST be constant across all runs ("ai-guard")
+ *  2. partialFingerprints   — deterministic per-result hash; enables deduplication
+ *                             across reruns, branch updates, and PR synchronization
+ *  3. category (upload step) — set in the GitHub Actions workflow; links this
+ *                             tool to a persistent analysis slot in Code Scanning
+ *
+ * Without these, GitHub classifies every upload as an isolated snapshot, closes
+ * old alerts immediately, and never promotes findings to the repository-level
+ * alert tracker.
  */
 
+import { createHash } from 'crypto';
 import path from 'path';
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
 import { ISSUE_CONFIDENCE, ISSUE_CATEGORY, ISSUE_ASYNC_RISK_TYPE, ISSUE_REMEDIATION } from './eslint-runner.js';
@@ -78,6 +94,13 @@ interface SarifResult {
   rank?: number;  // 0-100 confidence rank for GitHub UI ordering
   message: { text: string };
   locations: SarifLocation[];
+  /**
+   * Deterministic per-result hash for GitHub alert deduplication.
+   * Key format: "ai-guard/v1" — version-namespaced so future algorithm
+   * changes don't invalidate all existing alerts.
+   * Value: 64-char SHA-256 hex of ruleId + normalizedUri + line + message.
+   */
+  partialFingerprints?: Record<string, string>;
   properties?: {
     confidence?: string;
     asyncRiskType?: string;
@@ -98,6 +121,16 @@ interface SarifTool {
 
 interface SarifRun {
   tool: SarifTool;
+  /**
+   * Stable tool identifier — groups multiple scan runs into one persistent
+   * analysis slot in GitHub Code Scanning.
+   *
+   * MUST be:
+   *  - Constant across all runs, branches, and PRs
+   *  - Never include timestamps, random IDs, branch names, or PR numbers
+   *  - Short, lowercase, stable: "ai-guard"
+   */
+  automationDetails?: { id: string };
   results: SarifResult[];
   artifacts?: Array<{ location: SarifArtifactLocation }>;
   properties?: Record<string, unknown>;
@@ -108,6 +141,21 @@ interface SarifLog {
   version: '2.1.0';
   runs: SarifRun[];
 }
+
+// ─── Persistence constants ────────────────────────────────────────────────────
+
+/**
+ * Stable automation ID used in automationDetails.
+ * MUST remain constant across all releases and all runs.
+ * Changing this will orphan all existing GitHub Code Scanning alerts.
+ */
+export const SARIF_AUTOMATION_ID = 'ai-guard';
+
+/**
+ * Fingerprint namespace key.
+ * Versioned so future algorithm changes can coexist during migration.
+ */
+export const FINGERPRINT_KEY = 'ai-guard/v1';
 
 // ─── Rule metadata ────────────────────────────────────────────────────────────
 //
@@ -327,6 +375,56 @@ export function normalizeSarifPath(filePath: string, repoRoot?: string): string 
   return normalized;
 }
 
+/**
+ * Generate a stable, deterministic fingerprint for a SARIF result.
+ *
+ * GitHub uses partialFingerprints to deduplicate findings across scan runs,
+ * branches, and PR synchronizations. Without stable fingerprints, GitHub
+ * treats every upload as entirely new findings — closing and reopening alerts
+ * on every run, and never promoting them to persistent repository-level alerts.
+ *
+ * Algorithm: SHA-256 over the concatenation of:
+ *   ruleId + ":" + normalizedUri + ":" + startLine + ":" + normalizedMessage
+ *
+ * Invariants enforced:
+ *  - normalizedUri: POSIX, repo-relative, lowercase — stable across OS and runner
+ *  - ruleId: always "ai-guard/rule-name" — never changes for a given rule
+ *  - startLine: numeric string — changes only when code moves
+ *  - normalizedMessage: trimmed, lowercase — removes whitespace/capitalization drift
+ *
+ * Deliberately excluded:
+ *  - Timestamps (non-deterministic)
+ *  - Absolute paths (runner-specific)
+ *  - Branch names, PR numbers (change per context)
+ *  - Tool version (would invalidate all alerts on upgrade)
+ *  - Column numbers (column reporting can drift across parser versions)
+ *
+ * @param normalizedUri - Repository-relative POSIX path (from normalizeSarifPath)
+ * @param ruleId        - Full rule ID, e.g. "ai-guard/no-floating-promise"
+ * @param startLine     - 1-indexed start line of the finding
+ * @param message       - Raw diagnostic message text
+ * @returns 64-char lowercase hex SHA-256 string
+ */
+export function generateStableFingerprint(
+  normalizedUri: string,
+  ruleId: string,
+  startLine: number,
+  message: string,
+): string {
+  // Normalize message: trim whitespace, lowercase, collapse internal spaces.
+  // This ensures minor message wording changes don’t create new GitHub alerts.
+  const normalizedMessage = message.trim().toLowerCase().replace(/\s+/g, ' ');
+
+  const input = [
+    ruleId,
+    normalizedUri.toLowerCase(),
+    String(startLine),
+    normalizedMessage,
+  ].join(':');
+
+  return createHash('sha256').update(input, 'utf8').digest('hex');
+}
+
 function collectUsedRuleIds(result: RunResult): string[] {
   const ids = new Set<string>();
   for (const file of result.files) {
@@ -393,12 +491,26 @@ function buildSarifResult(issue: IssueDetail, file: FileResult, repoRoot?: strin
   // CRITICAL: No uriBaseId — GitHub resolves repo-relative paths directly.
   const sarifUri = normalizeSarifPath(file.filePath, repoRoot);
 
+  // Generate a stable fingerprint for GitHub alert deduplication.
+  // This is what makes findings persist across reruns and branch updates.
+  const fingerprint = generateStableFingerprint(
+    sarifUri,
+    issue.ruleId,
+    Math.max(1, issue.line),
+    issue.message,
+  );
+
   return {
     ruleId: issue.ruleId,
     level: confidenceToSarifLevel(confidence),
     kind: confidence === 'informational' ? 'informational' : 'fail',
     rank: confidenceToRank(confidence),
     message: { text: issue.message },
+    // partialFingerprints: per-result hash for GitHub alert deduplication.
+    // Without this, GitHub closes and reopens every alert on every scan run.
+    partialFingerprints: {
+      [FINGERPRINT_KEY]: fingerprint,
+    },
     locations: [
       {
         physicalLocation: {
@@ -587,6 +699,12 @@ export function buildSarifLog(
             rules,
           },
         },
+        // automationDetails.id: stable tool identifier for GitHub Code Scanning.
+        // Groups all ai-guard scan runs into one persistent analysis slot.
+        // MUST remain "ai-guard" forever — changing this orphans all existing alerts.
+        automationDetails: {
+          id: SARIF_AUTOMATION_ID,
+        },
         results: sarifResults,
         properties: {
           preset: 'recommended',
@@ -624,6 +742,10 @@ export interface SarifPathDebugEntry {
 }
 
 export interface SarifDebugInfo {
+  /** Persistence anchor — must be stable across all runs */
+  automationId: string;
+  /** Fingerprint namespace key emitted in partialFingerprints */
+  fingerprintKey: string;
   rulesEmitted: Array<{
     id: string;
     rawTags: string[];
@@ -644,6 +766,8 @@ export interface SarifDebugInfo {
     filePath: string;
     normalizedUri: string;
     line: number;
+    /** SHA-256 fingerprint — what GitHub uses for alert deduplication */
+    fingerprint: string;
   }>;
   pathsDebug: SarifPathDebugEntry[];
   totalResults: number;
@@ -668,8 +792,10 @@ export function debugSarifPath(filePath: string, repoRoot?: string): SarifPathDe
 }
 
 /**
- * Build debug info for --debug-sarif and --debug-sarif-paths flags.
- * Shows raw vs. sanitized tags, path normalization trace, and result metadata.
+ * Build debug info for --debug-sarif, --debug-sarif-paths, and
+ * --debug-sarif-persistence flags.
+ * Shows raw vs. sanitized tags, path normalization trace, fingerprints,
+ * and persistence identity metadata.
  */
 export function buildSarifDebugInfo(result: RunResult, repoRoot?: string): SarifDebugInfo {
   const usedRuleIds = collectUsedRuleIds(result);
@@ -708,6 +834,13 @@ export function buildSarifDebugInfo(result: RunResult, repoRoot?: string): Sarif
 
     for (const issue of file.issues) {
       const confidence = ISSUE_CONFIDENCE[issue.ruleId];
+      const normalizedUri = normalizeSarifPath(file.filePath, repoRoot);
+      const fingerprint = generateStableFingerprint(
+        normalizedUri,
+        issue.ruleId,
+        Math.max(1, issue.line),
+        issue.message,
+      );
       resultsEmitted.push({
         ruleId: issue.ruleId,
         level: confidenceToSarifLevel(confidence),
@@ -715,13 +848,16 @@ export function buildSarifDebugInfo(result: RunResult, repoRoot?: string): Sarif
         securitySeverity: confidenceToSecuritySeverity(confidence),
         precision: confidenceToPrecision(confidence),
         filePath: file.filePath,
-        normalizedUri: normalizeSarifPath(file.filePath, repoRoot),
+        normalizedUri,
         line: issue.line,
+        fingerprint,
       });
     }
   }
 
   return {
+    automationId: SARIF_AUTOMATION_ID,
+    fingerprintKey: FINGERPRINT_KEY,
     rulesEmitted,
     resultsEmitted,
     pathsDebug,
