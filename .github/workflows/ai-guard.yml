@@ -1,0 +1,53 @@
+name: AI Guard PR Scan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  security-events: write
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  ai-guard-scan:
+    name: AI Guard Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build AI Guard
+        run: npm run build
+
+      - name: Scan changed files with AI Guard
+        run: |
+          node dist/cli/index.js changed \
+            --pr \
+            --strict \
+            --sarif \
+            --sarif-output ai-guard-results.sarif \
+            --fail-on none
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ai-guard-results.sarif
+          category: ai-guard
