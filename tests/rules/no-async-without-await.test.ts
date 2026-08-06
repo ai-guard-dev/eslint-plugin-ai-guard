@@ -106,6 +106,53 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
       code: `async function myCustomHandler() { doSomething(); }`,
       options: [{ allowedFunctionNames: ['myCustomHandler'] }],
     },
+    // Try/catch with return — async is needed for promise rejection handling
+    {
+      code: `
+        async function fetchSafe() {
+          try {
+            return fetchData();
+          } catch (e) {
+            return fallback();
+          }
+        }
+      `,
+    },
+    {
+      code: `
+        async function withFinally() {
+          try {
+            return db.query('SELECT 1');
+          } finally {
+            db.release();
+          }
+        }
+      `,
+    },
+    {
+      code: `
+        async function multiStatement() {
+          const conn = getConnection();
+          try {
+            return conn.execute(sql);
+          } catch (e) {
+            logger.error(e);
+            throw new AppError('query failed', { cause: e });
+          }
+        }
+      `,
+    },
+    {
+      code: `
+        const safeFetch = async () => {
+          try {
+            return fetch(url);
+          } catch {
+            return null;
+          }
+        };
+      `,
+    },
   ],
   invalid: [
     // Pass-through wrappers — produce asyncPassThrough (informational), not asyncWithoutAwait

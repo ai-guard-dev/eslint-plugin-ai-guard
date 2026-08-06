@@ -53,6 +53,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "npm run build && eslint src cli tests --ext .ts",
     "lint:self": "node dist/cli/index.js run --path src",
+    "lint:full": "node dist/cli/index.js run --path src --strict && node dist/cli/index.js run --path cli --strict",
     "init-context": "node dist/cli/index.js init-context",
     "prepublishOnly": "npm run typecheck && npm run test && npm run lint && npm run build"
   },

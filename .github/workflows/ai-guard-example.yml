@@ -35,6 +35,7 @@ jobs:
             --sarif \
             --sarif-output ai-guard-results.sarif \
             --fail-on none
+        continue-on-error: true
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3

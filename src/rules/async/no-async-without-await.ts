@@ -120,6 +120,52 @@ function isPassThroughWrapper(
 }
 
 /**
+ * Returns true if the function body contains a try/catch block with a return
+ * statement inside the try. This is a legitimate use of async — the function
+ * needs to be async so that promise rejections from the returned value are
+ * caught by the catch block.
+ *
+ * Pattern:
+ *   async function f() {
+ *     try { return somePromise(); }
+ *     catch (e) { handleError(e); }
+ *   }
+ *
+ * Without async, `return somePromise()` would bypass the catch entirely.
+ */
+function hasTryCatchWithReturn(
+  node:
+    | TSESTree.FunctionDeclaration
+    | TSESTree.FunctionExpression
+    | TSESTree.ArrowFunctionExpression,
+): boolean {
+  if (node.body.type !== AST_NODE_TYPES.BlockStatement) {
+    return false;
+  }
+
+  for (const stmt of node.body.body) {
+    if (stmt.type !== AST_NODE_TYPES.TryStatement) {
+      continue;
+    }
+
+    // Must have a catch or finally handler
+    if (!stmt.handler && !stmt.finalizer) {
+      continue;
+    }
+
+    // Check if the try block contains a return statement
+    const tryBlock = stmt.block;
+    for (const tryStmt of tryBlock.body) {
+      if (tryStmt.type === AST_NODE_TYPES.ReturnStatement) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Check if this is a framework-required async export.
  * Next.js App Router requires GET/POST/etc handlers to be async even if they
  * use synchronous APIs internally.
@@ -335,6 +381,13 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
           : node.body.type === AST_NODE_TYPES.AwaitExpression;
 
       if (bodyHasAwait) {
+        return;
+      }
+
+      // 6. Try/catch with return — async is intentional for promise rejection handling
+      // Pattern: async function f() { try { return somePromise(); } catch { ... } }
+      // Without async, the returned promise would reject uncaught.
+      if (node.body.type === AST_NODE_TYPES.BlockStatement && hasTryCatchWithReturn(node)) {
         return;
       }
 

@@ -313,6 +313,42 @@ export function registerDoctorCommand(program: Command): void {
         }
       }
 
+      // ── Check 12: GitHub Actions workflow ──────────────────────────────────
+      {
+        const workflowDir = path.join(cwd, '.github', 'workflows');
+        let hasAiGuardWorkflow = false;
+        try {
+          if ((await import('fs')).existsSync(workflowDir)) {
+            const files = (await import('fs')).readdirSync(workflowDir) as string[];
+            hasAiGuardWorkflow = files.some((f: string) => {
+              try {
+                const content = (require('fs') as typeof import('fs')).readFileSync(
+                  path.join(workflowDir, f),
+                  'utf-8',
+                );
+                return content.includes('ai-guard');
+              } catch {
+                return false;
+              }
+            });
+          }
+        } catch { /* skip */ }
+
+        checks.push({
+          label: 'GitHub Actions workflow configured',
+          pass: hasAiGuardWorkflow,
+          detail: hasAiGuardWorkflow
+            ? 'ai-guard workflow found in .github/workflows/'
+            : 'No ai-guard workflow found — PR validation and Code Scanning are not enabled',
+          fix: hasAiGuardWorkflow
+            ? undefined
+            : 'ai-guard init  (will offer to create a GitHub Actions workflow)',
+          note: hasAiGuardWorkflow
+            ? undefined
+            : 'A CI workflow enables PR annotations, SARIF upload, and GitHub Code Scanning.',
+        });
+      }
+
       // ─── Render results ────────────────────────────────────────────────────
 
       log.section('Diagnostics');

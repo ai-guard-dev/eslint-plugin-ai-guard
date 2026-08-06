@@ -159,7 +159,8 @@ including full-scan mode, baseline mode, and SARIF debugging.
 | `ai-guard run --json` | Output results as JSON (CI-friendly) |
 | `ai-guard changed --pr` | Scan only files changed in this PR |
 | `ai-guard changed --staged` | Scan only staged files (pre-commit hook) |
-| `ai-guard init` | Auto-configure ESLint for your project |
+| `ai-guard init` | Auto-configure ESLint + workflow + agent context |
+| `ai-guard init --yes` | Zero-prompt setup — recommended for CI/scripts |
 | `ai-guard init-context` | Generate AI agent rules (CLAUDE.md, .cursorrules, etc.) |
 | `ai-guard baseline` | Save current issues, track only new ones going forward |
 | `ai-guard report` | Generate a shareable HTML report |
@@ -357,10 +358,11 @@ npx eslint src --fix
 git clone https://github.com/YashJadhav21/eslint-plugin-ai-guard.git
 cd eslint-plugin-ai-guard
 npm install
-npm run test         # 667 tests across 39 test files
+npm run test         # 678 tests across 39 test files
 npm run build        # Build CJS + ESM bundles
 npm run typecheck    # TypeScript strict check
 npm run lint:self    # Scan own source with ai-guard
+npm run lint:full    # Strict scan of src/ + cli/
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
@@ -374,11 +376,70 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 | [`docs/github-actions.md`](./docs/github-actions.md) | GitHub Actions workflow reference |
 | [`docs/ai-agents.md`](./docs/ai-agents.md) | AI agent integration guide |
 | [`docs/architecture.md`](./docs/architecture.md) | Architecture and internals |
+| [`docs/benchmarks.md`](./docs/benchmarks.md) | Benchmarks vs ESLint, @typescript-eslint |
 | [`docs/rules/`](./docs/rules/) | Per-rule documentation |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Contribution guide |
 | [`SECURITY.md`](./SECURITY.md) | Security policy |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Release history |
 | [`ROADMAP.md`](./ROADMAP.md) | Planned features |
+
+---
+
+## FAQ
+
+<details>
+<summary><strong>Is ai-guard a replacement for ESLint?</strong></summary>
+
+No. ai-guard runs *on top of* ESLint. It adds 18 rules specifically tuned for AI-generated
+code patterns. Your existing ESLint rules continue to work as normal.
+</details>
+
+<details>
+<summary><strong>Does ai-guard require TypeScript type information?</strong></summary>
+
+No. All rules use AST heuristics, not type analysis. This makes ai-guard faster than
+type-aware linters and zero-config for JavaScript projects. See
+[benchmarks](./docs/benchmarks.md) for performance comparison.
+</details>
+
+<details>
+<summary><strong>Will ai-guard slow down my CI?</strong></summary>
+
+Typically adds 1–2 seconds to a CI run. Changed-only mode (`ai-guard changed --pr`)
+is even faster because it only scans files modified in the PR.
+</details>
+
+<details>
+<summary><strong>How do I reduce false positives?</strong></summary>
+
+Start with `recommended` preset (default). The `strict` preset enables all rules,
+which may be noisy for some codebases. You can also:
+- Use `ai-guard baseline` to ignore pre-existing issues
+- Configure per-rule options (e.g., `allowedLoggers` for `no-console-in-handler`)
+- Use `// eslint-disable-next-line ai-guard/rule-name` for intentional overrides
+</details>
+
+<details>
+<summary><strong>Does ai-guard work with Copilot / Cursor / Claude Code?</strong></summary>
+
+Yes — in two ways:
+1. **Lint after generation**: ai-guard catches issues after AI generates code
+2. **Prevent before generation**: `ai-guard init-context` creates instruction files
+   (CLAUDE.md, .cursorrules) that teach AI agents to avoid these patterns
+</details>
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `Cannot find module 'eslint-plugin-ai-guard'` | Run `npm install --save-dev eslint-plugin-ai-guard` |
+| Config parse errors after `init` | Run `ai-guard doctor` to diagnose |
+| SARIF upload fails in GitHub Actions | Ensure `permissions: security-events: write` is set |
+| Too many findings in strict mode | Switch to `recommended` preset or use `ai-guard baseline` |
+| Rules not firing on `.ts` files | Install `@typescript-eslint/parser` |
+| `ai-guard init` skips workflow/context | Use `ai-guard init --yes` for zero-prompt setup |
 
 ---
 
