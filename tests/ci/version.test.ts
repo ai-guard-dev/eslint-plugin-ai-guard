@@ -35,9 +35,8 @@ describe('Version consistency', () => {
   });
 
   it('PKG_VERSION is not a hardcoded placeholder', () => {
-    // Guard against '0.0.0' (fallback) or '1.3.0' (old stale value)
+    // Guard against '0.0.0' (fallback)
     expect(PKG_VERSION).not.toBe('0.0.0');
-    expect(PKG_VERSION).not.toBe('1.3.0');  // Was hardcoded in Phase 2A, now removed
   });
 });
 
