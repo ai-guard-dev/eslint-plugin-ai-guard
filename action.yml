@@ -1,4 +1,4 @@
-name: 'AI Guard'
+name: 'ESLint AI Guard'
 description: 'Reliability guardrails for AI-generated code — catch async bugs, floating promises, and AI-specific mistakes in Pull Requests'
 author: 'Yash Jadhav'
 
