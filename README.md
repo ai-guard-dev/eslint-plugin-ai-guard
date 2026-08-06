@@ -32,7 +32,7 @@ npx ai-guard run
 npx ai-guard changed --sarif --sarif-output results.sarif
 ```
 
-  <img src="./assets/ss1.jpg" alt="AI Guard Screenshot" width="1000" />
+  <img src="./assets/ss8.jpg" alt="GitHub PR Inline Annotations by AI Guard" width="1000" />
 
 ---
 
@@ -133,15 +133,18 @@ jobs:
 
 This produces:
 - ✅ Inline PR annotations at the exact line of each finding
-- ✅ GitHub Advanced Security summary ("4 new alerts including 1 high severity")
+- ✅ GitHub Advanced Security summary ("17 new alerts including 3 high severity")
 - ✅ Persistent alerts in `Security → Code scanning`
 - ✅ PR status check that blocks merges on high-severity findings
 
-  <img src="./assets/ss1.jpg" alt="AI Guard Screenshot" width="1000" />
+### Inline PR Annotations
+<img src="./assets/ss9.jpg" alt="AI Guard PR Inline Annotations" width="1000" />
 
-  <img src="./assets/ss2.jpg" alt="AI Guard Screenshot" width="1000" />
+### GitHub Advanced Security Summary
+<img src="./assets/ss10.jpg" alt="GitHub Advanced Security Summary for AI Guard" width="1000" />
 
-  <img src="./assets/ss6.jpg" alt="AI Guard Screenshot" width="1000" />
+### GitHub Code Scanning Alerts
+<img src="./assets/ss11.jpg" alt="GitHub Code Scanning Alerts List" width="1000" />
 
 See [`docs/github-actions.md`](./docs/github-actions.md) for the complete workflow reference
 including full-scan mode, baseline mode, and SARIF debugging.
