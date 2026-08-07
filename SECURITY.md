@@ -17,7 +17,7 @@ We recommend always using the latest patch release.
 
 To report a vulnerability responsibly:
 
-1. **Email:** Open a [GitHub Security Advisory](https://github.com/YashJadhav21/eslint-plugin-ai-guard/security/advisories/new)
+1. **Email:** Open a [GitHub Security Advisory](https://github.com/ai-guard-dev/eslint-plugin-ai-guard/security/advisories/new)
    directly on the repository (private by default).
 
 2. **Include in your report:**

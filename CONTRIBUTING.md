@@ -72,7 +72,7 @@ We'll respond with `approved` or `declined` before you write code.
 ## Development Setup
 
 ```bash
-git clone https://github.com/YashJadhav21/eslint-plugin-ai-guard.git
+git clone https://github.com/ai-guard-dev/eslint-plugin-ai-guard.git
 cd eslint-plugin-ai-guard
 npm install
 

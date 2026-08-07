@@ -87,12 +87,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YashJadhav21/eslint-plugin-ai-guard.git"
+    "url": "git+https://github.com/ai-guard-dev/eslint-plugin-ai-guard.git"
   },
   "bugs": {
-    "url": "https://github.com/YashJadhav21/eslint-plugin-ai-guard/issues"
+    "url": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard/issues"
   },
-  "homepage": "https://github.com/YashJadhav21/eslint-plugin-ai-guard#readme",
+  "homepage": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard#readme",
   "author": "YashJadhav21",
   "license": "MIT"
 }

@@ -185,7 +185,7 @@ const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
   'ai-guard/no-dead-branch':          { shortDesc: 'Dead code branch that can never execute', tags: ['ai-patterns'] },
 };
 
-const BASE_DOCS_URL = 'https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/docs/rules';
+const BASE_DOCS_URL = 'https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules';
 
 // ─── SARIF Sanitizer ──────────────────────────────────────────────────────────
 //
@@ -695,7 +695,7 @@ export function buildSarifLog(
           driver: {
             name: 'ai-guard',
             version,
-            informationUri: 'https://github.com/YashJadhav21/eslint-plugin-ai-guard',
+            informationUri: 'https://github.com/ai-guard-dev/eslint-plugin-ai-guard',
             rules,
           },
         },

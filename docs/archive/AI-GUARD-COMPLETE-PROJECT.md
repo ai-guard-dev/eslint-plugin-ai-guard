@@ -161,6 +161,6 @@ MIT
 
 ## Links
 
-- [GitHub](https://github.com/YashJadhav21/eslint-plugin-ai-guard)
+- [GitHub](https://github.com/ai-guard-dev/eslint-plugin-ai-guard)
 - [NPM](https://www.npmjs.com/package/eslint-plugin-ai-guard)
-- [Rule Docs](https://github.com/YashJadhav21/eslint-plugin-ai-guard/tree/main/docs/rules)
+- [Rule Docs](https://github.com/ai-guard-dev/eslint-plugin-ai-guard/tree/main/docs/rules)

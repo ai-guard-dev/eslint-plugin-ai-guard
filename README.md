@@ -6,10 +6,10 @@
   </p>
   <p align="center">
     <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><img src="https://img.shields.io/npm/v/eslint-plugin-ai-guard.svg?style=flat-square&color=7c3aed" alt="npm version"></a>
-    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/YashJadhav21/eslint-plugin-ai-guard/ci.yml?style=flat-square&label=CI&color=10b981" alt="CI"></a>
+    <a href="https://github.com/ai-guard-dev/eslint-plugin-ai-guard/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ai-guard-dev/eslint-plugin-ai-guard/ci.yml?style=flat-square&label=CI&color=10b981" alt="CI"></a>
     <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><img src="https://img.shields.io/npm/dm/eslint-plugin-ai-guard.svg?style=flat-square&color=3b82f6" alt="downloads"></a>
-    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/eslint-plugin-ai-guard.svg?style=flat-square&color=64748b" alt="MIT License"></a>
-    <a href="https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/SECURITY.md"><img src="https://img.shields.io/badge/security-policy-orange?style=flat-square" alt="Security Policy"></a>
+    <a href="https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/eslint-plugin-ai-guard.svg?style=flat-square&color=64748b" alt="MIT License"></a>
+    <a href="https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/SECURITY.md"><img src="https://img.shields.io/badge/security-policy-orange?style=flat-square" alt="Security Policy"></a>
   </p>
 </p>
 
@@ -358,7 +358,7 @@ npx eslint src --fix
 ## Development
 
 ```bash
-git clone https://github.com/YashJadhav21/eslint-plugin-ai-guard.git
+git clone https://github.com/ai-guard-dev/eslint-plugin-ai-guard.git
 cd eslint-plugin-ai-guard
 npm install
 npm run test         # 678 tests across 39 test files

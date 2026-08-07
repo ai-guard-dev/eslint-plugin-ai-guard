@@ -3,7 +3,7 @@ import type { TSESTree, TSESLint } from '@typescript-eslint/utils';
 import path from 'path';
 
 const createRule = ESLintUtils.RuleCreator(
-  (name) => `https://github.com/YashJadhav21/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
+  (name) => `https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
 );
 
 // ─── Framework file patterns ────────────────────────────────────────────────

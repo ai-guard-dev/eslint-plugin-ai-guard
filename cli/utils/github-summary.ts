@@ -264,7 +264,7 @@ export function buildGitHubSummaryMarkdown(
   }
   lines.push('- Run `ai-guard baseline` to suppress known issues and track only new ones');
   lines.push('');
-  lines.push('*Powered by [eslint-plugin-ai-guard](https://github.com/YashJadhav21/eslint-plugin-ai-guard)*');
+  lines.push('*Powered by [eslint-plugin-ai-guard](https://github.com/ai-guard-dev/eslint-plugin-ai-guard)*');
 
   return lines.join('\n');
 }

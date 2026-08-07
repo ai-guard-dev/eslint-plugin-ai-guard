@@ -147,14 +147,14 @@ function computeNewIssues(
 
 export function registerBaselineCommand(program: Command): void {
   program
-    .command('baseline')
-    .description('Save current issues as baseline; future runs show only new issues')
+    .command('baseline [action]')
+    .description('Save current issues as baseline; future runs show only new issues (save | check)')
     .option('--save', 'Save current state as the new baseline')
     .option('--check', 'Show only issues introduced since the last baseline')
     .option('--mode <name>', 'Baseline match mode: strict | stable', 'stable')
     .option('--path <dir>', 'Directory to scan', '.')
     .option('--preset <name>', 'Preset: recommended | strict | security', 'recommended')
-    .action(async (opts: {
+    .action(async (action: string | undefined, opts: {
       save?: boolean;
       check?: boolean;
       mode?: string;
@@ -165,6 +165,9 @@ export function registerBaselineCommand(program: Command): void {
       const preset = (opts.preset as Preset) ?? 'recommended';
       const mode = (opts.mode as BaselineMode) ?? 'stable';
 
+      const isSaveAction = action === 'save' || opts.save === true;
+      const isCheckAction = action === 'check' || opts.check === true;
+
       if (mode !== 'strict' && mode !== 'stable') {
         log.error('Invalid --mode. Use strict or stable.');
         process.exit(1);
@@ -173,10 +176,10 @@ export function registerBaselineCommand(program: Command): void {
       log.banner('AI GUARD BASELINE');
       log.blank();
 
-      // If neither flag provided, default to --save if no baseline exists, else --check
+      // If neither flag/action provided, default to save if no baseline exists, else check
       const existingBaseline = loadBaseline(cwd);
-      const doSave = opts.save ?? (!existingBaseline && !opts.check);
-      const doCheck = opts.check ?? (existingBaseline !== null && !opts.save);
+      const doSave = isSaveAction || (!action && !opts.save && !opts.check && !existingBaseline);
+      const doCheck = isCheckAction || (!action && !opts.save && !opts.check && existingBaseline !== null);
 
       if (doSave) {
         log.info('Scanning project to save baseline…');

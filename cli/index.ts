@@ -74,7 +74,7 @@ process.on('unhandledRejection', (reason: unknown) => {
     reason instanceof Error ? reason.message : String(reason);
   log.error(`Unexpected error: ${msg}`);
   log.info('If this looks like a bug, please report it at:');
-  log.info('  https://github.com/YashJadhav21/eslint-plugin-ai-guard/issues');
+  log.info('  https://github.com/ai-guard-dev/eslint-plugin-ai-guard/issues');
   process.exit(1);
 });
 
