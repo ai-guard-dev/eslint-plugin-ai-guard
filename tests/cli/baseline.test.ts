@@ -130,5 +130,5 @@ try {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15000);
 });

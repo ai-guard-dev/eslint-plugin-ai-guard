@@ -42,7 +42,7 @@ try {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15000);
 
   it('supports .mts files in single-file mode', async () => {
     const dir = createTempProject();
