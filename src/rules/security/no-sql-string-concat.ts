@@ -157,10 +157,7 @@ function isKnownBuilderExpression(
   }
 
   if (node.type === AST_NODE_TYPES.CallExpression || node.type === AST_NODE_TYPES.NewExpression) {
-    const pathParts =
-      node.type === AST_NODE_TYPES.CallExpression
-        ? getExpressionPathParts(node.callee)
-        : getExpressionPathParts(node.callee);
+    const pathParts = getExpressionPathParts(node.callee);
 
     return pathParts.some(
       (part) => isKnownBuilderName(part) || isKnownBuilderBinding(part, builderBindings),
