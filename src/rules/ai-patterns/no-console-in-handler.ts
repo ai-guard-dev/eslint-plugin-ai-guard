@@ -236,6 +236,25 @@ export const noConsoleInHandler = createRule<[ConsoleInHandlerOptions], 'noConso
           }
 
           if (argument.body.type !== AST_NODE_TYPES.BlockStatement) {
+            // Expression-body arrow function: (req, res) => console.log('test')
+            // Traverse the expression body for console calls (M6)
+            traverseForConsoleCalls(argument.body, (callNode) => {
+              const parent = callNode.parent;
+              const canSuggestRemoval = parent?.type === AST_NODE_TYPES.ExpressionStatement;
+
+              context.report({
+                node: callNode,
+                messageId: 'noConsoleInHandler',
+                suggest: canSuggestRemoval
+                  ? [
+                      {
+                        messageId: 'removeConsoleCall',
+                        fix: (fixer) => fixer.remove(parent),
+                      },
+                    ]
+                  : undefined,
+              });
+            }, allowedLoggers, allowedConsoleMethods);
             continue;
           }
 

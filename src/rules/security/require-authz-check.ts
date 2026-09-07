@@ -19,11 +19,11 @@ const AUTHZ_HELPER_NAMES = [
 
 // ─── Context detection (shared with require-auth-middleware) ──────────────────
 const ELECTRON_PATH_PATTERNS = [
-  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /preload\.js$/, /background\.js$/,
+  /[\\\/]electron[\\\/]i, /[\\\/]electron-main/i, /\bpreload\.js$/, /\bbackground\.js$,
 ];
 const INTERNAL_SCRIPT_PATTERNS = [
-  /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
-  /[\\/]debug[\\/]/i, /seed\./i, /migrate?\./i, /setup\./i,
+  /[\\\/]scripts[\\\/]i, /[\\\/]migrations?[\\\/]i, /[\\\/]seeds?[\\\/]i,
+  /[\\\/]debug[\\\/]i, /\bseed\./i, /\bmigrat(?:e|ion)\./i, /\bsetup\./i,
 ];
 function isElectronOrInternalFile(filePath: string): boolean {
   return (
@@ -122,38 +122,9 @@ function isReqUserPath(path: string[] | null): boolean {
   return hasPathPrefix(path, ['req', 'user']);
 }
 
-function containsAuthorizationHelper(node: TSESTree.Node): boolean {
-  if (
-    node.type === AST_NODE_TYPES.CallExpression &&
-    ((node.callee.type === AST_NODE_TYPES.Identifier &&
-      AUTHZ_HELPER_NAMES.includes(node.callee.name as (typeof AUTHZ_HELPER_NAMES)[number])) ||
-      (node.callee.type === AST_NODE_TYPES.MemberExpression &&
-        node.callee.property.type === AST_NODE_TYPES.Identifier &&
-        AUTHZ_HELPER_NAMES.includes(node.callee.property.name as (typeof AUTHZ_HELPER_NAMES)[number])))
-  ) {
-    return true;
-  }
-
-  const entries = Object.entries(node) as Array<[string, unknown]>;
-  for (const [key, value] of entries) {
-    if (key === 'parent') continue;
-
-    if (Array.isArray(value)) {
-      for (const child of value) {
-        if (child && typeof child === 'object' && 'type' in child) {
-          if (containsAuthorizationHelper(child as TSESTree.Node)) return true;
-        }
-      }
-      continue;
-    }
-
-    if (value && typeof value === 'object' && 'type' in value) {
-      if (containsAuthorizationHelper(value as TSESTree.Node)) return true;
-    }
-  }
-
-  return false;
-}
+// NOTE: containsAuthorizationHelper was removed as part of the H8 fix.
+// The authorization helper check is now inlined in collectBodySignals to
+// avoid O(n²) traversal.
 
 function collectBodySignals(node: TSESTree.Node): { hasResourceIdAccess: boolean; hasOwnershipCheck: boolean } {
   let hasResourceIdAccess = false;
@@ -184,7 +155,17 @@ function collectBodySignals(node: TSESTree.Node): { hasResourceIdAccess: boolean
       }
     }
 
-    if (containsAuthorizationHelper(current)) {
+    // Check if this node is an authorization helper call (H8: inline check
+    // instead of calling containsAuthorizationHelper which traverses the
+    // entire subtree again, causing O(n²) behavior)
+    if (
+      current.type === AST_NODE_TYPES.CallExpression &&
+      ((current.callee.type === AST_NODE_TYPES.Identifier &&
+        AUTHZ_HELPER_NAMES.includes(current.callee.name as (typeof AUTHZ_HELPER_NAMES)[number])) ||
+        (current.callee.type === AST_NODE_TYPES.MemberExpression &&
+          current.callee.property.type === AST_NODE_TYPES.Identifier &&
+          AUTHZ_HELPER_NAMES.includes(current.callee.property.name as (typeof AUTHZ_HELPER_NAMES)[number])))
+    ) {
       hasOwnershipCheck = true;
     }
 

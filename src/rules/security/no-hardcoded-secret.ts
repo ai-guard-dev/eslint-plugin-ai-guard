@@ -14,6 +14,7 @@ const SECRET_NAME_PATTERN = /(?:secret|password|passwd|api[_-]?key|auth[_-]?toke
 
 /**
  * Patterns that are definitely NOT secrets — common false positives.
+ * Stored lowercase; comparison is case-insensitive (see isFalsePositiveValue).
  */
 const FALSE_POSITIVE_VALUES = new Set([
   'password',
@@ -31,11 +32,17 @@ const FALSE_POSITIVE_VALUES = new Set([
   'changeme',
   'your-api-key',
   'your-secret',
-  'YOUR_API_KEY',
-  'YOUR_SECRET',
   'xxx',
-  'TODO',
+  'todo',
 ]);
+
+/**
+ * Variable-name suffixes that indicate the value is a hash, digest, or
+ * encrypted/encoded representation rather than a plaintext secret.
+ * These are excluded to reduce false positives (H5).
+ */
+const NON_SECRET_NAME_SUFFIXES =
+  /(?:hash|hashed|digest|checksum|encrypted|encoded|hmac|bcrypt|argon|salted)$/i;
 
 export const noHardcodedSecret = createRule({
   name: 'no-hardcoded-secret',
@@ -72,11 +79,11 @@ export const noHardcodedSecret = createRule({
         if (value === null) return;
 
         // Skip obviously fake/placeholder values
-        if (FALSE_POSITIVE_VALUES.has(value)) return;
+        if (isFalsePositiveValue(value)) return;
         if (value.length < 8) return;
 
-        // Skip process.env references (already using env vars)
-        if (isProcessEnvAccess(initNode)) return;
+        // Skip variable names that clearly refer to hashes/digests/encrypted values
+        if (NON_SECRET_NAME_SUFFIXES.test(varName)) return;
 
         context.report({
           node: initNode,
@@ -103,9 +110,9 @@ export const noHardcodedSecret = createRule({
 
         const value = getStringValue(node.right);
         if (value === null) return;
-        if (FALSE_POSITIVE_VALUES.has(value)) return;
+        if (isFalsePositiveValue(value)) return;
         if (value.length < 8) return;
-        if (isProcessEnvAccess(node.right)) return;
+        if (NON_SECRET_NAME_SUFFIXES.test(propName)) return;
 
         context.report({
           node: node.right,
@@ -133,9 +140,9 @@ export const noHardcodedSecret = createRule({
         const valueNode = node.value as TSESTree.Expression;
         const value = getStringValue(valueNode);
         if (value === null) return;
-        if (FALSE_POSITIVE_VALUES.has(value)) return;
+        if (isFalsePositiveValue(value)) return;
         if (value.length < 8) return;
-        if (isProcessEnvAccess(valueNode)) return;
+        if (NON_SECRET_NAME_SUFFIXES.test(propName)) return;
 
         context.report({
           node: valueNode,
@@ -185,15 +192,14 @@ function isRuleMetaMessagesProperty(node: TSESTree.Property): boolean {
   );
 }
 
-function isProcessEnvAccess(node: TSESTree.Expression): boolean {
-  return (
-    node.type === AST_NODE_TYPES.MemberExpression &&
-    node.object.type === AST_NODE_TYPES.MemberExpression &&
-    node.object.object.type === AST_NODE_TYPES.Identifier &&
-    node.object.object.name === 'process' &&
-    node.object.property.type === AST_NODE_TYPES.Identifier &&
-    node.object.property.name === 'env'
-  );
+/**
+ * Case-insensitive check against the false-positive value set (M8).
+ * Also normalizes underscores to hyphens so that 'YOUR_API_KEY' matches
+ * 'your-api-key'.
+ */
+function isFalsePositiveValue(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/_/g, '-');
+  return FALSE_POSITIVE_VALUES.has(normalized);
 }
 
 function toEnvVarName(name: string): string {
