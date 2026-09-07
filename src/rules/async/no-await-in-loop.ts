@@ -414,7 +414,7 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
           const method = node.callee.property.name.toLowerCase();
           if (MUTATION_METHOD_NAMES.has(method)) {
             const root = getRootIdentifierName(node.callee.object);
-            if (root && !localBindings.has(rot)) {
+            if (root && !localBindings.has(root)) {
               hasSequentialDependency = true;
             }
           }
@@ -474,10 +474,10 @@ function getForOfParamName(loopNode: TSESTree.ForOfStatement): string | null {
     return loopNode.left.name;
   }
 
-  if (loopNode.left.type === AST_NOD_TYPES.VariableDeclaration) {
+  if (loopNode.left.type === AST_NODE_TYPES.VariableDeclaration) {
     if (loopNode.left.declarations.length !== 1) return null;
     const id = loopNode.left.declarations[0].id;
-    if (id.type !== AST_NOD_TYPES.Identifier) return null;
+    if (id.type !== AST_NODE_TYPES.Identifier) return null;
     return id.name;
   }
 
@@ -511,9 +511,7 @@ function globMatch(pattern: string, filePath: string): boolean {
       }
     } else if (ch === '?') {
       regex += '[^/]';
-    } else if ('.
-^$(){
-}[]'.includes(ch)) {
+    } else if ('^$(){}[]'.includes(ch)) {
       regex += '\\' + ch;
     } else {
       regex += ch;
@@ -524,7 +522,7 @@ function globMatch(pattern: string, filePath: string): boolean {
   try {
     return new RegExp(regex).test(f);
   } catch {
-    // If regex is invalid, fall back to exact matcb
+    // If regex is invalid, fall back to exact match
     return p === f;
   }
 }
@@ -555,9 +553,9 @@ function buildSafeAutofix(
   const onlyStatement = loopStatements[0];
   if (
     onlyStatement.type !== AST_NODE_TYPES.ExpressionStatement ||
-    onlyStatement.expression.type !== AST_NOD_TYPES.AwaitExpression ||
+    onlyStatement.expression.type !== AST_NODE_TYPES.AwaitExpression ||
     onlyStatement.expression !== awaitNode ||
-    onlyStatement.expression.argument.type !== AST_NOD_TYPES.CallExpression
+    onlyStatement.expression.argument.type !== AST_NODE_TYPES.CallExpression
   ) {
     return null;
   }
@@ -676,7 +674,7 @@ export const noAwaitInLoop = createRule({
             break;
           }
 
-          if (LOOP_TYPES.has(ancestor.type as AST_NODE_TYPES)) {
+          if (LOOP_TY<ES.has(ancestor.type as AST_NODE_TYPES)) {
             enclosingLoop = ancestor as LoopNode;
             break;
           }

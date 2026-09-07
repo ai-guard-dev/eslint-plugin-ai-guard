@@ -97,7 +97,7 @@ function containsInstanceofCheck(node: TSESTree.Node | null | undefined, paramNa
   // Recurse into child nodes
   for (const key of Object.keys(node)) {
     if (key === 'parent') continue;
-    const child = (node as Record<string, unknown>)[key];
+    const child = (node as unknown as Record<string, unknown>)[key];
     if (Array.isArray(child)) {
       for (const item of child) {
         if (containsInstanceofCheck(item as TSESTree.Node | null | undefined, paramName)) return true;

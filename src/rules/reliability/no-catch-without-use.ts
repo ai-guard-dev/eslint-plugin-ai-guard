@@ -78,7 +78,7 @@ function containsIdentifierReference(node: TSESTree.Node, paramName: string): bo
     }
   }
 
-  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(node as unknown as Record<string, unknown>)) {
     if (key === 'parent' || key === 'type') continue;
     if (!value) continue;
 

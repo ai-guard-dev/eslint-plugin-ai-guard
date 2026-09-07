@@ -7,12 +7,12 @@ const createRule = ESLintUtils.RuleCreator(
 
 // Files where JSON.parse on internal data is expected and safe
 const INTERNAL_FILE_PATTERNS = [
-  /[\\\/]debug[\\\/]i,
-  /[\\\/]scripts[\\\/]i,
-  /[\\\/]tools[\\\/]i,
-  /[\\\/]migrations?[\\\/]i,
-  /[\\\/]seeds?[\\\/]i,
-  /[\\\/]fixtures[\\\/]i,
+  /[\\/]debug[\\/]/i,
+  /[\\/]scripts[\\/]/i,
+  /[\\/]tools[\\/]/i,
+  /[\\/]migrations?[\\/]/i,
+  /[\\/]seeds?[\\/]/i,
+  /[\\/]fixtures[\\/]/i,
   /\bcheck[-_]server/i,
   /\bdebug[-_]server/i,
   /\bdiagnostics/i,

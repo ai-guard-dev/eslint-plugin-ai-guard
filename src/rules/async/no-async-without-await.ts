@@ -12,7 +12,7 @@ const createRule = ESLintUtils.RuleCreator(
 
 const FRAMEWORK_FILE_PATTERNS = [
   // Next.js App Router
-  [/[/\\]route\.(ts|js|tsx|jsx)$/,
+  /[/\\]route\.(ts|js|tsx|jsx)$/,
   /[/\\]middleware\.(ts|js)$/,
   /[/\\]layout\.(tsx|jsx|ts|js)$/,
   /[/\\]page\.(tsx|jsx|ts|js)$/,
@@ -283,7 +283,7 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
     const {
       allowedFunctionNames = [],
       ignorePassThroughWrappers = true,
-      ignoreHandlerFunctions: true,
+      ignoreHandlerFunctions = true,
     } = options;
 
     // All HTTP methods + user-provided names are always skipped
@@ -309,7 +309,7 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
       // identifiers, and other non-promise expressions, adding await is
       // semantically nonsensical (e.g. `return await (1)`) so we don't
       // offer the suggestion.
-      if (node.body.type !== AST_NDE_TYPES.BlockStatement) {
+      if (node.body.type !== AST_NODE_TYPES.BlockStatement) {
         const body = node.body;
         if (
           body.type === AST_NODE_TYPES.CallExpression ||
@@ -324,4 +324,120 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
         return undefined;
       }
 
-      if (node.body.body.length !== Ä¤ì(€€€€€€€É•ÑÕÉ¸Õ¹‘•™¥¹•ì(€€€€€ô((€€€€€½¹ÍÐ½¹±åMÑ…Ñ•µ•¹Ð€ô¹½‘”¹‰½‘ä¹‰½‘ålÁtì((€€€€€¥˜€ (€€€€€€€½¹±åMÑ…Ñ•µ•¹Ð¹ÑåÁ”€ôôôMQ}9}QeAL¹I•ÑÕÉ¹MÑ…Ñ•µ•¹Ð€˜˜(€€€€€€€½¹±åMÑ…Ñ•µ•¹Ð¹…ÉÕµ•¹Ð€˜˜(€€€€€€€½¹±åMÑ…Ñ•µ•¹Ð¹…ÉÕµ•¹Ð¹ÑåÁ”€„ôôMQ}9=}QeAL¹Ý…¥ÑáÁÉ•ÍÍ¥½¸(€€€€€€¤ì(€€€€€€€½¹ÍÐ…Éœ€ô½¹±åMÑ…Ñ•µ•¹Ð¹…ÉÕµ•¹Ðì(€€€€€€€€¼¼=¹±äÍÕ•ÍÐ™½È…±°•áÁÉ•ÍÍ¥½¹Ì½Èµ•µ‰•È•áÁÉ•ÍÍ¥½¹Ì€¡Á½Ñ•¹Ñ¥…°ÁÉ½µ¥Í•Ì¤(€€€€€€€¥˜€ (€€€€€€€€€…Éœ¹ÑåÁ”€ôôôMQ}9=}QeAL¹…±±áÁÉ•ÍÍ¥½¸ñð(€€€€€€€€€€…Éœ¹ÑåÁ”€ôôôMQ}9=}QeAL¹5•µ‰•ÉáÁÉ•ÍÍ¥½¸(€€€€€€€€¤ì(€€€€€€€€€½¹ÍÐÉ•ÑÕÉ¹Y…±Õ•Q•áÐ€ôÍ½ÕÉ•½‘”¹•ÑQ•áÐ¡…Éœ¤ì(€€€€€€€€€É•ÑÕÉ¸mì(€€€€€€€€€€€µ•ÍÍ…•%è€…‘‘Ý…¥Ðœ°(€€€€€€€€€€€™¥àè€¡™¥á•ÈèQMM1¥¹Ð¹IÕ±•¥á•È¤€ôø™¥á•È¹É•Á±…•Q•áÐ¡…Éœ…ÌQMMQÉ•”¹9½‘”°…Ý…¥Ð€ ‘íÉ•ÑÕÉ¹Y…±Õ•Q•áÑô¥€¤°(€€€€€€€€€õtì(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸Õ¹‘•™¥¹•ì(€€€€€ô((€€€€€¥˜€¡½¹±åMÑ…Ñ•µ•¹Ð¹ÑåÁ”€ôôôMQ}9=}QeAL¹áÁÉ•ÍÍ¥½¹MÑ…Ñ•µ•¹Ð¤ì(€€€€€€€½¹ÍÐ•áÁÈ€ô½¹±åMÑ…Ñ•µ•¹Ð¹•áÁÉ•ÍÍ¥½¸ì(€€€€€€€¥˜€ (€€€€€€€€€•áÁÈ¹ÑåÁ”€ôôôMQ}9=}QeAL¹…±±áÁÉ•ÍÍ¥½¸ñð(€€€€€€€€€•áÁÈ¹ÑåÁ”€ôôôMQ}9=}QeAL¹5•µ‰•ÉáÁÉ•ÍÍ¥½¸(€€€€€€€€¤ì(€€€€€€€€€½¹ÍÐ•áÁÉQ•áÐ€ôÍ½ÕÉ•½‘”¹•ÑQ•áÐ¡•áÁÈ¤ì(€€€€€€€€€É•ÑÕÉ¸mì(€€€€€€€€€€€µ•ÍÍ…•%è€…‘‘Ý…¥Ðœ°(€€€€€€€€€€€™¥àè€¡™¥á•ÈèQMM1¥¹Ð¹IÕ±•¥á•È¤€ôø™¥á•È¹É•Á±…•Q•áÐ¡•áÁÈ…ÌQMMQÉ•”¹9½‘”°…Ý…¥Ð€ ‘í•áÁÉQ•áÑô¥€¤°(€€€€€€€€€õtì(€€€€€€€ô(€€€€€ô((€€€€€É•ÑÕÉ¸Õ¹‘•™¥¹•ì(€€€ô((€€€™Õ¹Ñ¥½¸É•Á½ÉÑ%™9••‘• (€€€€€¹½‘”è(€€€€€€€ðQMMQÉ•”¹Õ¹Ñ¥½¹•±…É…Ñ¥½¸(€€€€€€€ðQMMQÉ•”¹Õ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸(€€€€€€€ðQMMQÉ•”¹ÉÉ½ÝÕ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸(€€€€¤èÙ½¥ì(€€€€€¥˜€ …¹½‘”¹…Íå¹Œ¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€Ä¸É…µ•Ý½É¬™¥±”ÍÕÁÁÉ•ÍÍ¥½¸ƒŠP•¹Ñ¥É•±äÍ­¥À(€€€€€¥˜€¡¥ÍÉ…µ•Ý½É­¥±”¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€È¸!QQ@µ•Ñ¡½•áÁ½ÉÐÍÕÁÁÉ•ÍÍ¥½¸ƒŠPP½A=MP½•ÑŒ…É”…±Ý…åÌ…Íå¹Œ‰ä½¹Ù•¹Ñ¥½¸(€€€€€¥˜€¡¥ÍÕ¹Ñ¥½¹áÁ½ÉÑ•‘]¥Ñ¡!ÑÑÁ5•Ñ¡½‘9…µ”¡¹½‘”¤¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€Ì¸Õ¹Ñ¥½¸¹…µ”ÍÕÁÁÉ•ÍÍ¥½¸(€€€€€½¹ÍÐ™Õ¹9…µ”€ô•ÑÕ¹Ñ¥½¹9…µ”¡¹½‘”¤ì(€€€€€¥˜€¡™Õ¹9…µ”€˜˜Í­¥Á9…µ•Ì¹¡…Ì¡™Õ¹9…µ”¤¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€Ð¸5¥‘‘±•Ý…É”½±¥™•å±”¹…µ•ÌƒŠP½™Ñ•¸…Íå¹Œ‰ä½¹Ù•¹Ñ¥½¸(€€€€€¥˜€¡™Õ¹9…µ”€˜˜5%1]I}95}I`¹Ñ•ÍÐ¡™Õ¹9…µ”¤¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€Ô¸I•…Ð¡…¹‘±•È™Õ¹Ñ¥½¹Ì¥¸€¹ÑÍà¼¹©ÍàƒŠP¡…¹‘±”¨…¹½¸¨…É”…Íå¹Œ‰ä½¹Ù•¹Ñ¥½¸(€€€€€¥˜€¡¥¹½É•!…¹‘±•ÉÕ¹Ñ¥½¹Ì€˜˜¥ÍI•…Ñ¥±”€˜˜™Õ¹9…µ”€˜˜!91I}95}I`¹Ñ•ÍÐ¡™Õ¹9…µ”¤¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼¡•¬™½È…Ý…¥Ð(€€€€€½¹ÍÐ‰½‘å!…ÍÝ…¥Ð€ô(€€€€€€€¹½‘”¹‰½‘ä¹ÑåÁ”€ôôôMQ}9=}QeAL¹	±½­MÑ…Ñ•µ•¹Ð(€€€€€€€€€€ü½¹Ñ…¥¹ÍÝ…¥ÑáÁÉ•ÍÍ¥½¸¡¹½‘”¹‰½‘ä¤(€€€€€€€€€€è¹½‘”¹‰½‘ä¹ÑåÁ”€ôôôMQ}9=}QeAL¹Ý…¥ÑáÁÉ•ÍÍ¥½¸ì((€€€€€¥˜€¡‰½‘å!…ÍÝ…¥Ð¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€Ø¸QÉä½…Ñ Ý¥Ñ É•ÑÕÉ¸ƒŠP…Íå¹Œ¥Ì¥¹Ñ•¹Ñ¥½¹…°™½ÈÁÉ½µ¥Í”É•©•Ñ¥½¸¡…¹‘±¥¹œ(€€€€€€¼¼A…ÑÑ•É¸è…Íå¹Œ™Õ¹Ñ¥½¸˜ ¤ìÑÉäìÉ•ÑÕÉ¸Í½µ•AÉ½µ¥Í” ¤ìô…Ñ ì€¸¸¸ôô(€€€€€€¼¼]¥Ñ¡½ÕÐ…Íå¹Œ°Ñ¡”É•ÑÕÉ¹•ÁÉ½µ¥Í”Ý½Õ±É•©•ÐÕ¹…Õ¡Ð¸(€€€€€¥˜€¡¹½‘”¹‰½‘ä¹ÑåÁ”€ôôôMQ}9=}QeAL¹	±½­MÑ…Ñ•µ•¹Ð€˜˜¡…ÍQÉå…Ñ¡]¥Ñ¡I•ÑÕÉ¸¡¹½‘”¤¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼€Ø¸A…ÍÌµÑ¡É½Õ ÝÉ…ÁÁ•ÈƒŠP‘½Ý¹É…‘”Í•Ù•É¥ÑäÑ¼¥¹™½Éµ…Ñ¥½¹…°°¹½Ð„™Õ±°•ÉÉ½È(€€€€€¥˜€¡¥¹½É•A…ÍÍQ¡É½Õ¡]É…ÁÁ•ÉÌ€˜˜¥ÍA…ÍÍQ¡É½Õ¡]É…ÁÁ•È¡¹½‘”¤¤ì(€€€€€€€½¹Ñ•áÐ¹É•Á½ÉÐ¡ì(€€€€€€€€€¹½‘”°(€€€€€€€€€µ•ÍÍ…•%è€…Íå¹A…ÍÍQ¡É½Õ œ°(€€€€€€€€€€¼¼9¼…ÕÑ½™¥à™½ÈÁ…ÍÌµÑ¡É½Õ ƒŠP¥ÐÌ¥¹Ñ•¹Ñ¥½¹…°(€€€€€€€ô¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼ÉÉ½ÜÝ¥Ñ ¹½¸µ‰±½¬‰½‘äÑ¡…Ð¥Ì¹½Ð…¸Ý…¥ÑáÁÉ•ÍÍ¥½¸(€€€€€¥˜€¡¹½‘”¹‰½‘ä¹ÑåÁ”€„ôôMQ}9=}QeAL¹	±½­MÑ…Ñ•µ•¹Ð¤ì(€€€€€€€¥˜€¡¹½‘”¹‰½‘ä¹ÑåÁ”€„ôôMQ}9=}QeAL¹Ý…¥ÑáÁÉ•ÍÍ¥½¸¤ì(€€€€€€€€€½¹ÍÐÍÕ•ÍÐ€ô‰Õ¥±‘MÕ•ÍÑ¥½¸¡¹½‘”¤ì(€€€€€€€€€½¹Ñ•áÐ¹É•Á½ÉÐ¡ì(€€€€€€€€€€€¹½‘”°(€€€€€€€€€€€µ•ÍÍ…•%è€…Íå¹]¥Ñ¡½ÕÑÝ…¥Ðœ°(€€€€€€€€€€€ÍÕ•ÍÐ°(€€€€€€€€€ô¤ì(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô((€€€€€€¼¼	±½¬‰½‘äÝ¥Ñ ¹¼…Ý…¥Ð(€€€€€½¹ÍÐÍÕ•ÍÐ€ô‰Õ¥±‘MÕ•ÍÑ¥½¸¡¹½‘”¤ì(€€€€€½¹Ñ•áÐ¹É•Á½ÉÐ¡ì(€€€€€€€¹½‘”°(€€€€€€€µ•ÍÍ…•%è€…Íå¹]¥Ñ¡½ÕÑÝ…¥Ðœ°(€€€€€€€ÍÕ•ÍÐ°(€€€€€ô¤ì(€€€ô((€€€É•ÑÕÉ¸ì(€€€€€Õ¹Ñ¥½¹•±…É…Ñ¥½¸èÉ•Á½ÉÑ%™9••‘•°(€€€€€Õ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸èÉ•Á½ÉÑ%™9••‘•°(€€€€€ÉÉ½ÝÕ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸èÉ•Á½ÉÑ%™9••‘•°(€€€ôì(€ô°)ô¤ì()•áÁ½ÉÐ‘•™…Õ±Ð¹½Íå¹]¥Ñ¡½ÕÑÝ…¥Ðì
+      // Block body: only suggest for single return of CallExpression/MemberExpression
+      if (node.body.body.length !== 1) {
+        return undefined;
+      }
+
+      const onlyStatement = node.body.body[0];
+      if (
+        onlyStatement.type === AST_NODE_TYPES.ReturnStatement &&
+        onlyStatement.argument &&
+        onlyStatement.argument.type !== AST_NODE_TYPES.AwaitExpression &&
+        (onlyStatement.argument.type === AST_NODE_TYPES.CallExpression ||
+         onlyStatement.argument.type === AST_NODE_TYPES.MemberExpression)
+      ) {
+        const returnValueText = sourceCode.getText(onlyStatement.argument);
+        return [{
+          messageId: 'addAwait',
+          fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(onlyStatement.argument as TSESTree.Node, `await (${returnValueText})`),
+        }];
+      }
+
+      return undefined;
+    }
+
+    function reportIfNeeded(
+      node:
+        | TSESTree.FunctionDeclaration
+        | TSESTree.FunctionExpression
+        | TSESTree.ArrowFunctionExpression
+    ): void {
+      if (!node.async) {
+        return;
+      }
+
+      // 1. Framework file suppression â€” entirely skip
+      if (isFrameworkFile) {
+        return;
+      }
+
+      // 2. HTTP method export suppression â€” GET/POST/etc are always async by convention
+      if (isFunctionExportedWithHttpMethodName(node)) {
+        return;
+      }
+
+      // 3. Function name suppression
+      const funcName = getFunctionName(node);
+      if (funcName && skipNames.has(funcName)) {
+        return;
+      }
+
+      // 4. Middleware/lifecycle names â€” often async by convention
+      if (funcName && MIDDLEWARE_NAME_REGEX.test(funcName)) {
+        return;
+      }
+
+      // 5. React handler functions in .tsx/.jsx â€” handle* and on* are async by convention
+      if (ignoreHandlerFunctions && isReactFile && funcName && HANDLER_NAME_REGEX.test(funcName)) {
+        return;
+      }
+
+      // Check for await
+      const bodyHasAwait =
+        node.body.type === AST_NODE_TYPES.BlockStatement
+          ? containsAwaitExpression(node.body)
+          : node.body.type === AST_NODE_TYPES.AwaitExpression;
+
+      if (bodyHasAwait) {
+        return;
+      }
+
+      // 6. Try/catch with return â€” async is intentional for promise rejection handling
+      // Pattern: async function f() { try { return somePromise(); } catch { ... } }
+      // Without async, the returned promise would reject uncaught.
+      if (node.body.type === AST_NODE_TYPES.BlockStatement && hasTryCatchWithReturn(node)) {
+        return;
+      }
+
+      // 6. Pass-through wrapper â€” downgrade severity to informational, not a full error
+      if (ignorePassThroughWrappers && isPassThroughWrapper(node)) {
+        context.report({
+          node,
+          messageId: 'asyncPassThrough',
+          // No suggestion for pass-through â€” it's intentional
+        });
+        return;
+      }
+
+      // Arrow with non-block body that is not an AwaitExpression
+      if (node.body.type !== AST_NODE_TYPES.BlockStatement) {
+        if (node.body.type !== AST_NODE_TYPES.AwaitExpression) {
+          const suggest = buildSuggestion(node);
+          context.report({
+            node,
+            messageId: 'asyncWithoutAwait',
+            suggest,
+          });
+        }
+        return;
+      }
+
+      // Block body with no await
+      const suggest = buildSuggestion(node);
+      context.report({
+        node,
+        messageId: 'asyncWithoutAwait',
+        suggest,
+      });
+    }
+
+    return {
+      FunctionDeclaration: reportIfNeeded,
+      FunctionExpression: reportIfNeeded,
+      ArrowFunctionExpression: reportIfNeeded,
+    };
+  },
+});
+
+export default noAsyncWithoutAwait;

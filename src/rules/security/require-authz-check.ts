@@ -19,11 +19,11 @@ const AUTHZ_HELPER_NAMES = [
 
 // ─── Context detection (shared with require-auth-middleware) ──────────────────
 const ELECTRON_PATH_PATTERNS = [
-  /[\\\/]electron[\\\/]i, /[\\\/]electron-main/i, /\bpreload\.js$/, /\bbackground\.js$,
+  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /\bpreload\.js$/, /\bbackground\.js$/,
 ];
 const INTERNAL_SCRIPT_PATTERNS = [
-  /[\\\/]scripts[\\\/]i, /[\\\/]migrations?[\\\/]i, /[\\\/]seeds?[\\\/]i,
-  /[\\\/]debug[\\\/]i, /\bseed\./i, /\bmigrat(?:e|ion)\./i, /\bsetup\./i,
+  /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
+  /[\\/]debug[\\/]/i, /\bseed\./i, /\bmigrat(?:e|ion)\./i, /\bsetup\./i,
 ];
 function isElectronOrInternalFile(filePath: string): boolean {
   return (
@@ -164,7 +164,7 @@ function collectBodySignals(node: TSESTree.Node): { hasResourceIdAccess: boolean
         AUTHZ_HELPER_NAMES.includes(current.callee.name as (typeof AUTHZ_HELPER_NAMES)[number])) ||
         (current.callee.type === AST_NODE_TYPES.MemberExpression &&
           current.callee.property.type === AST_NODE_TYPES.Identifier &&
-          AUTHZ_HELPER_NAMES.includes(current.callee.property.name as (typeof AUTHZ_HELPER_NAMES)[number])))
+          AUTHZ_HELPER_NAMES.includes(current.callee.property.name as (typeof AUTTZ_HELPER_NAMES)[number])))
     ) {
       hasOwnershipCheck = true;
     }
