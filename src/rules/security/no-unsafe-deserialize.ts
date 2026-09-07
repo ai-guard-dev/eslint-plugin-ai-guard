@@ -7,20 +7,20 @@ const createRule = ESLintUtils.RuleCreator(
 
 // Files where JSON.parse on internal data is expected and safe
 const INTERNAL_FILE_PATTERNS = [
-  /[\\/]debug[\\/]/i,
-  /[\\/]scripts[\\/]/i,
-  /[\\/]tools[\\/]/i,
-  /[\\/]migrations?[\\/]/i,
-  /[\\/]seeds?[\\/]/i,
-  /[\\/]fixtures[\\/]/i,
-  /check[-_]server/i,
-  /debug[-_]server/i,
-  /diagnostics/i,
-  /seed\./i,
-  /migrate?\./i,
-  /setup\./i,
-  /scaffold\./i,
-  /test[-_].*\.js$/i,
+  /[\\\/]debug[\\\/]i,
+  /[\\\/]scripts[\\\/]i,
+  /[\\\/]tools[\\\/]i,
+  /[\\\/]migrations?[\\\/]i,
+  /[\\\/]seeds?[\\\/]i,
+  /[\\\/]fixtures[\\\/]i,
+  /\bcheck[-_]server/i,
+  /\bdebug[-_]server/i,
+  /\bdiagnostics/i,
+  /\bseed\./i,
+  /\bmigrat(?:e|ion)\./i,
+  /\bsetup\./i,
+  /\bscaffold\./i,
+  /\btest[-_].*\.js$/i,
 ];
 
 function isInternalToolingFile(filePath: string): boolean {

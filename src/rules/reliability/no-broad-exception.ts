@@ -1,4 +1,5 @@
 import { ESLintUtils, AST_NODE_TYPES } from '@typescript-eslint/utils';
+import type { TSESTree } from '@typescript-eslint/utils';
 
 const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
@@ -67,7 +68,7 @@ export const noBroadException = createRule({
  * patterns for the given parameter name.
  */
 function checkForNarrowing(
-  catchClause: { body: { body: readonly { type: string; [key: string]: any }[] } },
+  catchClause: TSESTree.CatchClause,
   paramName: string
 ): boolean {
   const bodyStatements = catchClause.body.body;
@@ -80,14 +81,14 @@ function checkForNarrowing(
   return false;
 }
 
-function containsInstanceofCheck(node: any, paramName: string): boolean {
+function containsInstanceofCheck(node: TSESTree.Node | null | undefined, paramName: string): boolean {
   if (!node || typeof node !== 'object') return false;
 
   // Check for: e instanceof SomeError
   if (
     node.type === AST_NODE_TYPES.BinaryExpression &&
     node.operator === 'instanceof' &&
-    node.left?.type === AST_NODE_TYPES.Identifier &&
+    node.left.type === AST_NODE_TYPES.Identifier &&
     node.left.name === paramName
   ) {
     return true;
@@ -96,13 +97,13 @@ function containsInstanceofCheck(node: any, paramName: string): boolean {
   // Recurse into child nodes
   for (const key of Object.keys(node)) {
     if (key === 'parent') continue;
-    const child = node[key];
+    const child = (node as Record<string, unknown>)[key];
     if (Array.isArray(child)) {
       for (const item of child) {
-        if (containsInstanceofCheck(item, paramName)) return true;
+        if (containsInstanceofCheck(item as TSESTree.Node | null | undefined, paramName)) return true;
       }
-    } else if (child && typeof child === 'object' && child.type) {
-      if (containsInstanceofCheck(child, paramName)) return true;
+    } else if (child && typeof child === 'object' && (child as { type?: string }).type) {
+      if (containsInstanceofCheck(child as TSESTree.Node, paramName)) return true;
     }
   }
   return false;

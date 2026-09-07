@@ -46,9 +46,19 @@ function isEmptyStringLiteral(node: TSESTree.Node): boolean {
  *   - `while (true)` (intentional infinite loops are common, so we exempt them)
  *   - `if (x && !x)` / `if (x || !x)` — self-contradictory / self-tautological
  *   - `x === x` when x is an identifier (trivially true)
+ *   - `if (null)` / `if (undefined)` — always falsy (M4)
  */
 function isAlwaysTrue(node: TSESTree.Node): boolean {
   if (isBooleanLiteral(node, true)) return true;
+
+  // Non-zero numeric literals are always truthy (H2): if (1), if (42)
+  if (
+    node.type === AST_NODE_TYPES.Literal &&
+    typeof node.value === 'number' &&
+    node.value !== 0
+  ) {
+    return true;
+  }
 
   // x || !x is always true
   if (
@@ -85,6 +95,19 @@ function isAlwaysFalse(node: TSESTree.Node): boolean {
   if (isBooleanLiteral(node, false)) return true;
   if (isZeroLiteral(node)) return true;
   if (isEmptyStringLiteral(node)) return true;
+
+  // null literal is always falsy (M4)
+  if (node.type === AST_NODE_TYPES.Literal && node.value === null) {
+    return true;
+  }
+
+  // undefined identifier is always falsy (M4)
+  if (
+    node.type === AST_NODE_TYPES.Identifier &&
+    node.name === 'undefined'
+  ) {
+    return true;
+  }
 
   // x && !x is always false
   if (

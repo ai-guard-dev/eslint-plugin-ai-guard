@@ -9,6 +9,14 @@ function normalizeStatementText(source: string): string {
   return source.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Minimum source-code length for a statement to be considered a "meaningful"
+ * duplicate (M5). Statements shorter than 30 characters (e.g. `return null;`,
+ * `x += 1;`) are too likely to appear legitimately in adjacent code, so we
+ * skip them to avoid noisy false positives. The threshold is intentionally
+ * conservative — it favours precision over recall for short blocks, while
+ * still catching the longer copy-paste blocks that are the real target.
+ */
 function isLikelyMeaningfulStatement(node: TSESTree.Statement, sourceCodeText: string): boolean {
   if (
     node.type === AST_NODE_TYPES.EmptyStatement ||

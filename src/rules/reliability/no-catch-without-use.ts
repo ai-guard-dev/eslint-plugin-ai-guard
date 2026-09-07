@@ -1,4 +1,5 @@
 import { ESLintUtils, AST_NODE_TYPES } from '@typescript-eslint/utils';
+import type { TSESTree } from '@typescript-eslint/utils';
 
 const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
@@ -34,12 +35,9 @@ export const noCatchWithoutUse = createRule({
           return;
         }
 
-        // Token-based check is intentionally conservative: if the identifier appears
-        // anywhere in the catch body, we treat it as used to avoid false positives.
-        const tokens = context.sourceCode.getTokens(node.body);
-        const hasUsage = tokens.some(
-          (token) => token.type === 'Identifier' && token.value === catchParamName
-        );
+        // Use AST traversal to detect actual identifier references,
+        // not raw text (which would match comments/strings) (M3).
+        const hasUsage = containsIdentifierReference(node.body, catchParamName);
 
         if (!hasUsage) {
           context.report({
@@ -52,5 +50,53 @@ export const noCatchWithoutUse = createRule({
     };
   },
 });
+
+/**
+ * Walk the AST subtree looking for an Identifier node referencing `paramName`.
+ * Only actual AST identifier references count — string literals, comments,
+ * and property keys of unrelated objects are excluded (M3).
+ */
+function containsIdentifierReference(node: TSESTree.Node, paramName: string): boolean {
+  if (!node) return false;
+
+  if (
+    node.type === AST_NODE_TYPES.Identifier &&
+    node.name === paramName
+  ) {
+    // Exclude property keys in non-computed member expressions:
+    // obj.error  ←  `error` is a property name, not a variable reference
+    const parent = node.parent;
+    if (
+      parent &&
+      parent.type === AST_NODE_TYPES.MemberExpression &&
+      parent.property === node &&
+      !parent.computed
+    ) {
+      // Not a variable reference — it's a property access
+    } else {
+      return true;
+    }
+  }
+
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === 'parent' || key === 'type') continue;
+    if (!value) continue;
+
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (child && typeof child === 'object' && 'type' in child) {
+          if (containsIdentifierReference(child as TSESTree.Node, paramName)) return true;
+        }
+      }
+      continue;
+    }
+
+    if (typeof value === 'object' && 'type' in value) {
+      if (containsIdentifierReference(value as TSESTree.Node, paramName)) return true;
+    }
+  }
+
+  return false;
+}
 
 export default noCatchWithoutUse;
