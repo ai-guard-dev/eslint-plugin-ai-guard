@@ -77,11 +77,15 @@ function loadBaseline(cwd: string): BaselineFile | null {
 type IssueKey = string;
 
 function issueKey(filePath: string, issue: BaselineIssue): IssueKey {
-  return `${filePath}::${issue.ruleId}::${issue.line}::${issue.column}::${issue.message}`;
+  // Normalize path separators to forward slashes for cross-platform compatibility (M11)
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  return `${normalizedPath}::${issue.ruleId}::${issue.line}::${issue.column}::${issue.message}`;
 }
 
 function stableIssueKey(filePath: string, issue: BaselineIssue): IssueKey {
-  return `${filePath}::${issue.ruleId}::${issue.message}`;
+  // Normalize path separators to forward slashes for cross-platform compatibility (M11)
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  return `${normalizedPath}::${issue.ruleId}::${issue.message}`;
 }
 
 function buildBaselineSet(baseline: BaselineFile, mode: BaselineMode): Set<IssueKey> {
