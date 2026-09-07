@@ -246,7 +246,7 @@ export const requireAuthzCheck = createRule({
           if (
             arg.type !== AST_NODE_TYPES.FunctionExpression &&
             arg.type !== AST_NODE_TYPES.ArrowFunctionExpression
-         ) {
+          ) {
             continue;
           }
 
@@ -260,7 +260,7 @@ export const requireAuthzCheck = createRule({
           if (isSensitive && !signals.hasOwnershipCheck) {
             context.report({
               node: arg,
-              messageId: 'missingAuthz',
+              messageId: 'missingAuthzw",
             });
           }
         }
