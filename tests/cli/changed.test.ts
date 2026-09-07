@@ -15,14 +15,9 @@ describe('git-diff utility', () => {
 
   describe('getChangedFiles', () => {
     it('returns fallback mode when git is not available', async () => {
-      const { execSync } = await import('child_process');
-      vi.spyOn({ execSync }, 'execSync').mockImplementation(() => {
-        throw new Error('git not found');
-      });
-
       // Mock the module
       vi.doMock('child_process', () => ({
-        execSync: () => { throw new Error('git not found'); },
+        execFileSync: () => { throw new Error('git not found'); },
       }));
 
       const { getChangedFiles } = await import('../../cli/utils/git-diff.js');

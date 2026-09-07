@@ -120,6 +120,29 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
     },
   ],
   invalid: [
+    // H4 Regression: floating promise in outer function with nested try/catch
+    // The nested function's try/catch must NOT suppress the outer finding.
+    {
+      code: `
+        async function outer() {
+          fetch('/api/data');
+          const cb = function() {
+            try { innerWork(); } catch (e) { console.log(e); }
+          };
+          cb();
+        }
+      `,
+      output: `
+        async function outer() {
+          void fetch('/api/data');
+          const cb = function() {
+            try { innerWork(); } catch (e) { console.log(e); }
+          };
+          cb();
+        }
+      `,
+      errors: [{ messageId: 'floatingPromise' }],
+    },
     // 1. Bare fetch() call as statement
     {
       code: `fetch('/api/users');`,

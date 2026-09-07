@@ -170,20 +170,14 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
           return 1;
         }
       `,
-      output: `
-        async function run() {
-          return await (1);
-        }
-      `,
+      output: null,
       errors: [{ messageId: 'asyncWithoutAwait' }],
     },
     {
       code: `
         const run = async () => 1;
       `,
-      output: `
-        const run = async () => await (1);
-      `,
+      output: null,
       errors: [{ messageId: 'asyncWithoutAwait' }],
     },
     {
@@ -201,12 +195,12 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
           doWork();
         }
       `,
-      output: `
+      output: null,
+      errors: [{ messageId: 'asyncWithoutAwait', suggestions: [{ messageId: 'addAwait', output: `
         async function run() {
           await (doWork());
         }
-      `,
-      errors: [{ messageId: 'asyncWithoutAwait' }],
+      ` }] }],
     },
     {
       code: `
@@ -264,11 +258,58 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
           Promise.resolve(1);
         };
       `,
-      output: `
+      output: null,
+      errors: [{ messageId: 'asyncWithoutAwait', suggestions: [{ messageId: 'addAwait', output: `
         const fn = async () => {
           await (Promise.resolve(1));
         };
+      ` }] }],
+    },
+  ],
+});
+
+// ─── H1 Regression: autofix replaced by suggestions ────────────────────────
+// The rule must NOT provide an automatic fix (fixable: 'code') because
+// the old autofix transformed `return 1` -> `return await (1)` which is
+// semantically nonsensical. Instead, suggestions are offered only for
+// expressions that could reasonably be promises.
+
+ruleTester.run('no-async-without-await (H1: safe suggestions)', noAsyncWithoutAwait, {
+  valid: [],
+  invalid: [
+    // 1. Literal return -- no suggestion should be offered
+    {
+      code: `async function f() { return 1; }`,
+      output: null,
+      errors: [{ messageId: 'asyncWithoutAwait' }],
+    },
+    // 2. Call expression return -- suggestion to add await IS appropriate
+    {
+      code: `async function f() { return doWork(); }`,
+      output: null,
+      errors: [{ messageId: 'asyncPassThrough' }], // pass-through wrapper
+    },
+    // 3. Expression-body async arrow with literal -- no suggestion
+    {
+      code: `const f = async () => 1;`,
+      output: null,
+      errors: [{ messageId: 'asyncWithoutAwait' }],
+    },
+    // 4. Empty body -- no suggestion
+    {
+      code: `async function empty() {}`,
+      output: null,
+      errors: [{ messageId: 'asyncWithoutAwait' }],
+    },
+    // 5. Multi-statement body -- no suggestion
+    {
+      code: `
+        async function run() {
+          if (condition) { return a(); }
+          return b();
+        }
       `,
+      output: null,
       errors: [{ messageId: 'asyncWithoutAwait' }],
     },
   ],
