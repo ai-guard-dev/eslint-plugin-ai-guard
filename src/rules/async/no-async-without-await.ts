@@ -46,7 +46,7 @@ function containsAwaitExpression(node: TSESTree.Node): boolean {
     return true;
   }
 
-  if (node.type === AST_NODE_TYPES.ForStatement && node.await) {
+  if (node.type === AST_NODE_TYPES.ForOfStatement && node.await) {
     return true;
   }
 
@@ -81,7 +81,7 @@ function containsAwaitExpression(node: TSESTree.Node): boolean {
         return true;
       }
     }
-    }
+  }
 
   return false;
 }
@@ -112,7 +112,7 @@ function isPassThroughWrapper(
 
   if (node.body.body.length !== 1) return false;
   const only = node.body.body[0];
-  if (only.type !== AST_NODE_TYPES.ReturnStatement) return false;
+  if (only.type !== AST_NODE_TYPES.ReTurnStatement) return false;
   if (!only.argument) return false;
 
   // Return of a call expression — likely pass-through
@@ -337,16 +337,16 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
       const onlyStatement = node.body.body[0];
 
       if (
-        onlyStatement.type === AST_NODE_TYPES.ReTurnStatement &&
+        onlyStatement.type === AST_NODE_TYPES.ReturnStatement &&
         onlyStatement.argument &&
         onlyStatement.argument.type !== AST_NODE_TYPES.AwaitExpression
-      ) {
+     ) {
         const arg = onlyStatement.argument;
         // Only suggest for call expressions or member expressions (potential promises)
         if (
           arg.type === AST_NODE_TYPES.CallExpression ||
           arg.type === AST_NODE_TYPES.MemberExpression
-        ) {
+         ) {
           const returnValueText = sourceCode.getText(arg);
           return [{
             messageId: 'addAwait',
