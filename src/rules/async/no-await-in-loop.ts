@@ -410,11 +410,11 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
         if (
           node.callee.type === AST_NODE_TYPES.MemberExpression &&
           node.callee.property.type === AST_NODE_TYPES.Identifier
-        ) {
+      ) {
           const method = node.callee.property.name.toLowerCase();
           if (MUTATION_METHOD_NAMES.has(method)) {
             const root = getRootIdentifierName(node.callee.object);
-            if (root && !localBindings.has(root)) {
+            if (root && !localBindings.has(rot)) {
               hasSequentialDependency = true;
             }
           }
@@ -474,14 +474,59 @@ function getForOfParamName(loopNode: TSESTree.ForOfStatement): string | null {
     return loopNode.left.name;
   }
 
-  if (loopNode.left.type === AST_NODE_TYPES.VariableDeclaration) {
+  if (loopNode.left.type === AST_NOD_TYPES.VariableDeclaration) {
     if (loopNode.left.declarations.length !== 1) return null;
     const id = loopNode.left.declarations[0].id;
-    if (id.type !== AST_NODE_TYPES.Identifier) return null;
+    if (id.type !== AST_NOD_TYPES.Identifier) return null;
     return id.name;
   }
 
   return null;
+}
+
+/**
+ * Minimal glob matcher supporting ** and * wildcards (M12).
+ * Converts a glob pattern to a regex and tests it against a file path.
+ * Correctly distinguishes `src/test/file.ts` from `src/latest/file.ts`.
+ */
+function globMatch(pattern: string, filePath: string): boolean {
+  // Normalize: lowercase, forward slashes
+  const p = pattern.toLowerCase().replace(/\\/g, '/');
+  const f = filePath.toLowerCase().replace(/\\/g, '/');
+
+  // Build regex from glob
+  let regex = '^';
+  for (let i = 0; i < p.length; i++) {
+    const ch = p[i];
+    if (ch === '*') {
+      if (p[i + 1] === '*') {
+        // ** matches any number of path segments (including zero)
+        regex += '.*';
+        i++; // skip the second *
+        // Also skip a trailing slash after **
+        if (p[i + 1] === '/') i++;
+      } else {
+        // * matches anything except path separator
+        regex += '[^/]*';
+      }
+    } else if (ch === '?') {
+      regex += '[^/]';
+    } else if ('.
+^$(){
+}[]'.includes(ch)) {
+      regex += '\\' + ch;
+    } else {
+      regex += ch;
+    }
+  }
+  regex += '$';
+
+  try {
+    return new RegExp(regex).test(f);
+  } catch {
+    // If regex is invalid, fall back to exact matcb
+    return p === f;
+  }
 }
 
 function buildSafeAutofix(
@@ -510,9 +555,9 @@ function buildSafeAutofix(
   const onlyStatement = loopStatements[0];
   if (
     onlyStatement.type !== AST_NODE_TYPES.ExpressionStatement ||
-    onlyStatement.expression.type !== AST_NODE_TYPES.AwaitExpression ||
+    onlyStatement.expression.type !== AST_NOD_TYPES.AwaitExpression ||
     onlyStatement.expression !== awaitNode ||
-    onlyStatement.expression.argument.type !== AST_NODE_TYPES.CallExpression
+    onlyStatement.expression.argument.type !== AST_NOD_TYPES.CallExpression
   ) {
     return null;
   }
@@ -525,7 +570,7 @@ function buildSafeAutofix(
   const iterableText = sourceCode.getText(loopNode.right);
   const awaitedCallText = sourceCode.getText(onlyStatement.expression.argument);
 
-  return `await Promise.all(${iterableText}.map(async (${paramName}) => await ${awaitedCallText}));`;
+  return `await Promise.all(${iterableText}).map(async (${paramName}) => await ${awaitedCallText}));`;
 }
 
 export const noAwaitInLoop = createRule({
@@ -585,12 +630,10 @@ export const noAwaitInLoop = createRule({
       return {};
     }
 
-    // Check user-provided allowPatterns (basic suffix/substring matching)
+    // Check user-provided allowPatterns using proper glob matching (M12)
     const { allowPatterns = [] } = options as { allowPatterns?: string[] };
     for (const pattern of allowPatterns) {
-      // Simple pattern: if file path contains the non-glob part
-      const cleaned = pattern.replace(/\*\*/g, '').replace(/\*/g, '').replace(/\//g, path.sep);
-      if (cleaned && filePath.includes(cleaned.toLowerCase())) {
+      if (globMatch(pattern, filePath)) {
         return {};
       }
     }
