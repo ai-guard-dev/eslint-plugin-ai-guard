@@ -12,7 +12,7 @@ const createRule = ESLintUtils.RuleCreator(
 
 const FRAMEWORK_FILE_PATTERNS = [
   // Next.js App Router
-  [/[/\\]route\.(ts|js|tsx|jsx)$/,
+  /[/\\]route\.(ts|js|tsx|jsx)$/,
   /[/\\]middleware\.(ts|js)$/,
   /[/\\]layout\.(tsx|jsx|ts|js)$/,
   /[/\\]page\.(tsx|jsx|ts|js)$/,
