@@ -19,7 +19,7 @@ const SUPPRESSION_REGEX = /ai-guard-disable\s+no-await-in-loop\b/i;
 const RETRY_NAME_REGEX = /(retry|retries|attempt|attempts|fallback|tryagain|recovery)/i;
 const SEQUENTIAL_DEPENDENCY_NAME_REGEX = /(previous|prev|last|carry|accumulator|stateful)/i;
 // Simulation, animation, and step-by-step patterns â€” sequential await is intentional
-const SIMULATION_NAME_REGEX = /(simulatl|animat|demo|visual|step|scene|frame|render|tick|sequence|tutorial|lesson|walk)/i;
+const SIMULATION_NAME_REGEX = /(simulat|animat|demo|visuali|step|scene|frame|render|tick|sequence|tutorial|lesson|walk)/i;
 
 const ERROR_CODE_HINTS = [
   'access-denied',
@@ -410,7 +410,7 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
         if (
           node.callee.type === AST_NODE_TYPES.MemberExpression &&
           node.callee.property.type === AST_NODE_TYPES.Identifier
-       ) {
+        ) {
           const method = node.callee.property.name.toLowerCase();
           if (MUTATION_METHOD_NAMES.has(method)) {
             const root = getRootIdentifierName(node.callee.object);
@@ -437,7 +437,7 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
         hasErrorCodeHint = true;
       }
 
-      walkNode
+      walkNode(
         sibling,
         (node) => {
           if (node.type === AST_NODE_TYPES.Identifier) {
@@ -562,7 +562,7 @@ export const noAwaitInLoop = createRule({
     }
 
     // File-level suppression: test files and simulation/demo files use sequential await intentionally
-    const filename = context.filename ?? context.getFileName?.() ?? '';
+    const filename = context.filename ?? context.getFilename?.() ?? '';
     const fileBasename = path.basename(filename).toLowerCase();
     const filePath = filename.toLowerCase();
 
@@ -589,7 +589,7 @@ export const noAwaitInLoop = createRule({
     const { allowPatterns = [] } = options as { allowPatterns?: string[] };
     for (const pattern of allowPatterns) {
       // Simple pattern: if file path contains the non-glob part
-      const cleaned = pattern.replace(/\*\)/g, '').replace(/\*/g, '').replace(/\//g, path.sep);
+      const cleaned = pattern.replace(/\*\*/g, '').replace(/\*/g, '').replace(/\//g, path.sep);
       if (cleaned && filePath.includes(cleaned.toLowerCase())) {
         return {};
       }
@@ -633,20 +633,50 @@ export const noAwaitInLoop = createRule({
             break;
           }
 
-          if (LOOP_TYPF‹š\Ê[˜Ù\ÝÜ‹\H\ÈTÕÓ“ÑWÕTTÊJHÂˆ[˜ÛÜÚ[™ÓÛÜH[˜Ù\ÝÜˆ\ÈÛÜ›ÙNÂˆœ™XZÎÂˆBˆB‚ˆYˆ
-Y[˜ÛÜÚ[™ÓÛÜ
-HÂˆ™]\›ŽÂˆB‚ˆYˆ
-™\ÜYÛÜËš\Ê[˜ÛÜÚ[™ÓÛÜ
-JHÂˆ™]\›ŽÂˆB‚ˆYˆ
-\ÓÛÜÝ\™\ÜÚ[ÛŠ[˜ÛÜÚ[™ÓÛÜÛÛ^œÛÝ\˜ÙPÛÙJJHÂˆ™]\›ŽÂˆB‚ˆÛÛœÝ[[HÛÜ[[ØXÚK™Ù]
-[˜ÛÜÚ[™ÓÛÜ
-HÏÈ[˜[^™R[[
-[˜ÛÜÚ[™ÓÛÜ
-NÂˆÛÜ[[ØXÚKœÙ]
-[˜ÛÜÚ[™ÓÛÜ[[
-NÂ‚ˆËÈ[[X]Ø\™H™Z]š[ÜŽ‚ˆËÈ™]žKÙ˜[˜XÚËÜÙ\]Y[X[ÛÜÈ\™HÝ\™\ÜÙY
-›È™\Ü
-K‚ˆYˆ
-Z[[š\Ò[™\[™[
-HÂˆ™]\›ŽÂˆB‚ˆÛÛœÝš^^HZ[ØY™P]]Ùš^
-[˜ÛÜÚ[™ÓÛÜ›ÙKÛÛ^œÛÝ\˜ÙPÛÙJNÂˆÛÛœÝÛÜ˜[YHHÙ]ÛÜ›ÙS˜[YJ[˜ÛÜÚ[™ÓÛÜ\H\ÈTÕÓ“ÑWÕVPQTÉ½ÉÐ¡ì(€€€€€€€€€¹½‘”°(€€€€€€€€€µ•ÍÍ…•%è€…Ý…¥Ñ%¹1½½Àœ°(€€€€€€€€€‘…Ñ„èì±½½ÁQåÁ”è±½½Á9…µ”ô°(€€€€€€€€€™¥àè(€€€€€€€€€€€™¥áQ•áÐ€ôôô¹Õ±°(€€€€€€€€€€€€€€üÕ¹‘•™¥¹•(€€€€€€€€€€€€€€è€¡™¥á•È¤€ôø™¥á•È¹É•Á±…•Q•áÐ¡•¹±½Í¥¹1½½À…ÌÕ¹­¹½Ý¸…ÌQMMQÉ•”¹9½‘”°™¥áQ•áÐ¤°(€€€€€€€ô¤ì((€€€€€€€É•Á½ÉÑ•‘1½½ÁÌ¹…‘¡•¹±½Í¥¹1½½À¤ì(€€€€€ô°(€€€ôì(€ô°)ô¤ì()•áÁ½ÉÐ‘•™…Õ±Ð¹½Ý…¥Ñ%¹1½½Àì(
+          if (LOOP_TYPES.has(ancestor.type as AST_NODE_TYPES)) {
+            enclosingLoop = ancestor as LoopNode;
+            break;
+          }
+        }
+
+        if (!enclosingLoop) {
+          return;
+        }
+
+        if (reportedLoops.has(enclosingLoop)) {
+          return;
+        }
+
+        if (hasLoopSuppression(enclosingLoop, context.sourceCode)) {
+          return;
+        }
+
+        const intent = loopIntentCache.get(enclosingLoop) ?? analyzeIntent(enclosingLoop);
+        loopIntentCache.set(enclosingLoop, intent);
+
+        // Intent-aware behavior:
+        // retry/fallback/sequential loops are suppressed (no report).
+        if (!intent.isIndependent) {
+          return;
+        }
+
+        const fixText = buildSafeAutofix(enclosingLoop, node, context.sourceCode);
+        const loopName = getLoopNodeName(enclosingLoop.type as AST_NODE_TYPES);
+
+        context.report({
+          node,
+          messageId: 'awaitInLoop',
+          data: { loopType: loopName },
+          fix:
+            fixText === null
+              ? undefined
+              : (fixer) => fixer.replaceText(enclosingLoop as unknown as TSESTree.Node, fixText),
+        });
+
+        reportedLoops.add(enclosingLoop);
+      },
+    };
+  },
+});
+
+export default noAwaitInLoop;

@@ -23,7 +23,7 @@ const ELECTRON_PATH_PATTERNS = [
 ];
 const INTERNAL_SCRIPT_PATTERNS = [
   /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
-  /[\\/]debug[\\/]/i, /seed\./i, /migrat(?:e|ion)\./i, /setup\./i,
+  /[\\/]debug[\\/]/i, /seed\./i, /migrate?\./i, /setup\./i,
 ];
 function isElectronOrInternalFile(filePath: string): boolean {
   return (
@@ -35,7 +35,7 @@ function isElectronOrInternalFile(filePath: string): boolean {
 function isRouteRegistrationCall(node: TSESTree.CallExpression): boolean {
   if (
     node.callee.type !== AST_NODE_TYPES.MemberExpression ||
-    node.called.property.type !== AST_NODE_TYPES.Identifier
+    node.callee.property.type !== AST_NODE_TYPES.Identifier
   ) {
     return false;
   }
@@ -260,7 +260,7 @@ export const requireAuthzCheck = createRule({
           if (isSensitive && !signals.hasOwnershipCheck) {
             context.report({
               node: arg,
-              messageId: 'missingAuthzw",
+              messageId: 'missingAuthz',
             });
           }
         }

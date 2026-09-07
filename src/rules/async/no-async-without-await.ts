@@ -12,7 +12,7 @@ const createRule = ESLintUtils.RuleCreator(
 
 const FRAMEWORK_FILE_PATTERNS = [
   // Next.js App Router
-  /[/\\]route\.(ts|js|tsx|jsx)$/,
+  [/[/\\]route\.(ts|js|tsx|jsx)$/,
   /[/\\]middleware\.(ts|js)$/,
   /[/\\]layout\.(tsx|jsx|ts|js)$/,
   /[/\\]page\.(tsx|jsx|ts|js)$/,
@@ -112,7 +112,7 @@ function isPassThroughWrapper(
 
   if (node.body.body.length !== 1) return false;
   const only = node.body.body[0];
-  if (only.type !== AST_NODE_TYPES.ReTurnStatement) return false;
+  if (only.type !== AST_NODE_TYPES.ReturnStatement) return false;
   if (!only.argument) return false;
 
   // Return of a call expression — likely pass-through
@@ -340,13 +340,13 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
         onlyStatement.type === AST_NODE_TYPES.ReturnStatement &&
         onlyStatement.argument &&
         onlyStatement.argument.type !== AST_NODE_TYPES.AwaitExpression
-     ) {
+      ) {
         const arg = onlyStatement.argument;
         // Only suggest for call expressions or member expressions (potential promises)
         if (
           arg.type === AST_NODE_TYPES.CallExpression ||
           arg.type === AST_NODE_TYPES.MemberExpression
-         ) {
+        ) {
           const returnValueText = sourceCode.getText(arg);
           return [{
             messageId: 'addAwait',
