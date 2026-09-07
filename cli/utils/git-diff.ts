@@ -22,7 +22,7 @@
  * Both are fixed in Phase 2B.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 
@@ -107,13 +107,14 @@ const IGNORE_PREFIXES = [
 
 // ─── Low-level git runner ─────────────────────────────────────────────────────
 
-function runGit(args: string, cwd: string): string | null {
+function runGit(args: readonly string[], cwd: string): string | null {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync('git', args, {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 15000,
+      shell: false,
     }).trim();
   } catch {
     return null;
@@ -121,15 +122,15 @@ function runGit(args: string, cwd: string): string | null {
 }
 
 function isGitAvailable(cwd: string): boolean {
-  return runGit('rev-parse --is-inside-work-tree', cwd) === 'true';
+  return runGit(['rev-parse', '--is-inside-work-tree'], cwd) === 'true';
 }
 
 function isShallowClone(cwd: string): boolean {
-  return runGit('rev-parse --is-shallow-repository', cwd) === 'true';
+  return runGit(['rev-parse', '--is-shallow-repository'], cwd) === 'true';
 }
 
 function isDetachedHead(cwd: string): boolean {
-  const result = runGit('symbolic-ref --quiet HEAD', cwd);
+  const result = runGit(['symbolic-ref', '--quiet', 'HEAD'], cwd);
   return result === null;
 }
 
@@ -139,7 +140,7 @@ function isDetachedHead(cwd: string): boolean {
  */
 function detectDefaultBranch(cwd: string): string | null {
   // Try origin/HEAD (most reliable)
-  const symbolic = runGit('symbolic-ref refs/remotes/origin/HEAD', cwd);
+  const symbolic = runGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], cwd);
   if (symbolic) {
     const match = /refs\/remotes\/origin\/(.+)$/.exec(symbolic);
     if (match) return match[1];
@@ -147,9 +148,9 @@ function detectDefaultBranch(cwd: string): string | null {
 
   // Try common branch names
   for (const candidate of ['main', 'master', 'develop', 'development']) {
-    const check = runGit(`rev-parse --verify origin/${candidate}`, cwd);
+    const check = runGit(['rev-parse', '--verify', `origin/${candidate}`], cwd);
     if (check) return candidate;
-    const checkLocal = runGit(`rev-parse --verify ${candidate}`, cwd);
+    const checkLocal = runGit(['rev-parse', '--verify', candidate], cwd);
     if (checkLocal) return candidate;
   }
 
@@ -197,10 +198,10 @@ function tryPrDiff(
   {
     const strategy = `merge-base HEAD origin/${rawBranch}`;
     debugInfo.strategiesAttempted.push(strategy);
-    const mergeBase = runGit(`merge-base HEAD origin/${rawBranch}`, cwd);
+    const mergeBase = runGit(['merge-base', 'HEAD', `origin/${rawBranch}`], cwd);
     if (mergeBase) {
       debugInfo.mergeBase = mergeBase;
-      const out = runGit(`diff --name-only --diff-filter=ACMRT ${mergeBase}`, cwd);
+      const out = runGit(['diff', '--name-only', '--diff-filter=ACMRT', mergeBase], cwd);
       if (out !== null) {
         debugInfo.strategySucceeded = strategy;
         return { output: out, strategy, mergeBase };
@@ -212,7 +213,7 @@ function tryPrDiff(
   {
     const strategy = `merge-base HEAD ${rawBranch}`;
     debugInfo.strategiesAttempted.push(strategy);
-    const mergeBase = runGit(`merge-base HEAD ${rawBranch}`, cwd);
+    const mergeBase = runGit(['merge-base', 'HEAD', rawBranch], cwd);
     if (mergeBase) {
       if (!debugInfo.mergeBase) debugInfo.mergeBase = mergeBase;
       const out = runGit(`diff --name-only --diff-filter=ACMRT ${mergeBase}`, cwd);
@@ -227,7 +228,7 @@ function tryPrDiff(
   {
     const strategy = `diff origin/${rawBranch}...HEAD`;
     debugInfo.strategiesAttempted.push(strategy);
-    const out = runGit(`diff --name-only --diff-filter=ACMRT origin/${rawBranch}...HEAD`, cwd);
+    const out = runGit(['diff', '--name-only', '--diff-filter=ACMRT', `origin/${rawBranch}...HEAD`], cwd);
     if (out !== null) {
       debugInfo.strategySucceeded = strategy;
       return { output: out, strategy };
@@ -238,7 +239,7 @@ function tryPrDiff(
   {
     const strategy = `diff ${rawBranch}...HEAD`;
     debugInfo.strategiesAttempted.push(strategy);
-    const out = runGit(`diff --name-only --diff-filter=ACMRT ${rawBranch}...HEAD`, cwd);
+    const out = runGit(['diff', '--name-only', '--diff-filter=ACMRT', `${rawBranch}...HEAD`], cwd);
     if (out !== null) {
       debugInfo.strategySucceeded = strategy;
       return { output: out, strategy };
@@ -249,7 +250,7 @@ function tryPrDiff(
   {
     const strategy = 'diff HEAD~1 (shallow fallback)';
     debugInfo.strategiesAttempted.push(strategy);
-    const out = runGit('diff --name-only --diff-filter=ACMRT HEAD~1', cwd);
+    const out = runGit(['diff', '--name-only', '--diff-filter=ACMRT', 'HEAD~1'], cwd);
     if (out !== null) {
       debugInfo.strategySucceeded = strategy;
       return { output: out, strategy };
@@ -391,7 +392,7 @@ export function getChangedFiles(
 
   if (staged) {
     // ── Staged mode ─────────────────────────────────────────────────────────
-    rawOutput = runGit('diff --name-only --cached --diff-filter=ACMRT', cwd);
+    rawOutput = runGit(['diff', '--name-only', '--cached', '--diff-filter=ACMRT'], cwd);
     mode = 'staged';
     debugInfo.strategiesAttempted.push('git diff --cached');
     if (rawOutput !== null) debugInfo.strategySucceeded = 'git diff --cached';
@@ -423,8 +424,8 @@ export function getChangedFiles(
   } else {
     // ── Uncommitted changes mode ─────────────────────────────────────────────
     mode = 'uncommitted';
-    const staged_ = runGit('diff --name-only --cached --diff-filter=ACMRT', cwd) ?? '';
-    const unstaged = runGit('diff --name-only --diff-filter=ACMRT', cwd) ?? '';
+    const staged_ = runGit(['diff', '--name-only', '--cached', '--diff-filter=ACMRT'], cwd) ?? '';
+    const unstaged = runGit(['diff', '--name-only', '--diff-filter=ACMRT'], cwd) ?? '';
     debugInfo.strategiesAttempted.push('git diff --cached', 'git diff (unstaged)');
     const combined = new Set([...parseFileList(staged_), ...parseFileList(unstaged)]);
     rawOutput = [...combined].join('\n');

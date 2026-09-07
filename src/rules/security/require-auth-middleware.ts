@@ -207,22 +207,28 @@ export const requireAuthMiddleware = createRule({
 
     // ── Route analysis ────────────────────────────────────────────────────
 
-    // Track if router.use(protect) is applied (blanket auth covers all subsequent routes)
-    let hasRouterUseAuth = false;
+    // Track which router objects have blanket auth (router.use(protect))
+    // Key = router variable name, Value = true if auth middleware applied.
+    // This prevents state leaking across different router instances.
+    const routersWithAuth = new Set<string>();
 
     return {
       CallExpression(node) {
         // Detect router.use(protect) or app.use(protect) — blanket auth
         if (isRouterUseAuth(node, allAuthNames)) {
-          hasRouterUseAuth = true;
+          const routerName = getRouterObjectName(node);
+          if (routerName) {
+            routersWithAuth.add(routerName);
+          }
           return;
         }
 
         // Check for: router.get('/path', handler) or app.post('/path', handler)
         if (!isRouteDefinition(node)) return;
 
-        // If a blanket router.use(auth) was already applied, skip
-        if (hasRouterUseAuth) return;
+        // If this specific router has blanket auth applied, skip
+        const routerName = getRouterObjectName(node);
+        if (routerName && routersWithAuth.has(routerName)) return;
 
         const callee = node.callee as TSESTree.MemberExpression;
         const method = (callee.property as TSESTree.Identifier).name;
@@ -296,6 +302,26 @@ function isRouterUseAuth(node: TSESTree.CallExpression, authNames: Set<string>):
 
   // Check if any argument is an auth middleware
   return node.arguments.some((arg) => isAuthMiddleware(arg, authNames));
+}
+
+/**
+ * Extract the variable name of the router/app object from a call expression
+ * like `router.use(...)` or `app.get(...)`.
+ *
+ * Returns the identifier name (e.g., "router", "app", "adminRouter") or null
+ * if the object is not a simple identifier (e.g., `express.Router().get(...)`).
+ *
+ * This is used to associate router.use(auth) with subsequent route definitions
+ * on the same router, preventing auth state from leaking across routers.
+ */
+function getRouterObjectName(node: TSESTree.CallExpression): string | null {
+  if (node.callee.type !== AST_NODE_TYPES.MemberExpression) return null;
+  const obj = node.callee.object;
+  if (obj.type === AST_NODE_TYPES.Identifier) {
+    return obj.name;
+  }
+  // express.Router().use(...) — no simple name to track
+  return null;
 }
 
 function isAuthMiddleware(node: TSESTree.Node, authNames: Set<string>): boolean {

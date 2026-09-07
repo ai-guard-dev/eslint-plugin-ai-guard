@@ -20,13 +20,14 @@ const MOCK_CWD = process.cwd();
 const capturedGitCommands: string[] = [];
 
 function mockGitResponses(responses: Record<string, string | null>) {
-  const { execSync } = require('child_process');
-  vi.spyOn(require('child_process'), 'execSync').mockImplementation((cmd: string) => {
-    capturedGitCommands.push(cmd as string);
-    const key = Object.keys(responses).find((k) => (cmd as string).includes(k));
+  const { execFileSync } = require('child_process');
+  vi.spyOn(require('child_process'), 'execFileSync').mockImplementation((cmd: string, args: string[]) => {
+    const fullCmd = `${cmd} ${(args ?? []).join(' ')}`;
+    capturedGitCommands.push(fullCmd);
+    const key = Object.keys(responses).find((k) => fullCmd.includes(k));
     const response = key !== undefined ? responses[key] : null;
     if (response === null) {
-      throw new Error(`Git command failed (mock): ${cmd as string}`);
+      throw new Error(`Git command failed (mock): ${fullCmd}`);
     }
     return response;
   });
@@ -249,6 +250,71 @@ describe('Path normalization', () => {
       expect(f).not.toMatch(/\/\//);
       expect(f).not.toMatch(/\\\\/);
     }
+  });
+});
+
+
+// ─── Security regression: no shell injection in --base ─────────────────────
+
+describe('SECURITY: no shell injection via --base', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const maliciousInputs = [
+    'main; echo PWNED',
+    'main && echo PWNED',
+    'main$(echo PWNED)',
+    'main`echo PWNED`',
+    'main| echo PWNED',
+  ];
+
+  for (const malicious of maliciousInputs) {
+    it(`passes "${malicious}" as a single git arg (no shell execution)`, () => {
+      let capturedCmd: string | null = null;
+      let capturedArgs: string[] = [];
+
+      vi.spyOn(require('child_process'), 'execFileSync').mockImplementation(
+        (cmd: string, args: string[]) => {
+          if (!capturedCmd) {
+            capturedCmd = cmd;
+            capturedArgs = args ?? [];
+          }
+          if (args.includes('--is-inside-work-tree')) return 'true';
+          if (args.includes('--is-shallow-repository')) return 'false';
+          if (args.includes('symbolic-ref')) throw new Error('detached HEAD');
+          throw new Error('ref not found');
+        },
+      );
+
+      getChangedFiles({ cwd: MOCK_CWD, base: malicious });
+
+      expect(capturedCmd).toBe('git');
+      expect(capturedCmd).not.toContain(';');
+      expect(capturedCmd).not.toContain('$(');
+      expect(capturedCmd).not.toContain('&&');
+    });
+  }
+
+  it('normal branch name works correctly with execFileSync', () => {
+    let capturedCmd: string | null = null;
+    let capturedArgs: string[] = [];
+
+    vi.spyOn(require('child_process'), 'execFileSync').mockImplementation(
+      (cmd: string, args: string[]) => {
+        if (!capturedCmd) {
+          capturedCmd = cmd;
+          capturedArgs = args ?? [];
+        }
+        if (args.includes('--is-inside-work-tree')) return 'true';
+        throw new Error('ref not found');
+      },
+    );
+
+    getChangedFiles({ cwd: MOCK_CWD, base: 'main' });
+
+    expect(capturedCmd).toBe('git');
+    expect(capturedArgs).toEqual(['rev-parse', '--is-inside-work-tree']);
   });
 });
 

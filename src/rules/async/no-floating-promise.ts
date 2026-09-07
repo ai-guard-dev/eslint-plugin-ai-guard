@@ -56,8 +56,21 @@ function isAstNode(value: unknown): value is TSESTree.Node {
 }
 
 function nodeHasCatchClause(node: TSESTree.Node): boolean {
+  // Found a try/catch at this level
   if (node.type === AST_NODE_TYPES.TryStatement && !!node.handler) {
     return true;
+  }
+
+  // Do not traverse into nested function bodies — a try/catch inside a
+  // nested function does NOT provide error handling for the enclosing
+  // function's floating promise. This mirrors the nested-function boundary
+  // behavior used by containsAwaitExpression() in no-async-without-await.
+  if (
+    node.type === AST_NODE_TYPES.FunctionDeclaration ||
+    node.type === AST_NODE_TYPES.FunctionExpression ||
+    node.type === AST_NODE_TYPES.ArrowFunctionExpression
+  ) {
+    return false;
   }
 
   for (const [key, value] of Object.entries(node as unknown as Record<string, unknown>)) {

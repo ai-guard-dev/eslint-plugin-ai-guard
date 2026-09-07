@@ -107,35 +107,40 @@ async function main() {
   }
 
   // ── Build ai-guard command ────────────────────────────────────────────────
+  // Build argv as a structured array — NEVER join and split, to preserve
+  // paths and values containing spaces or shell metacharacters.
   const command = changedOnly ? 'changed' : 'run';
-  const prFlag = changedOnly && process.env.GITHUB_BASE_REF ? '--pr' : '';
-
-  const presetFlag = preset !== 'recommended'
-    ? (preset === 'strict' ? '--strict' : '--security')
-    : '';
 
   const sarifOutputPath = path.resolve(cwd, sarifOutput);
 
-  const args = [
-    command,
-    prFlag,
-    `--path ${scanPath}`,
-    presetFlag,
-    `--fail-on ${failOn}`,
-    `--sarif-output ${sarifOutputPath}`,
-    '--sarif',
-  ].filter(Boolean).join(' ');
+  const cliArgs = [command];
+
+  if (changedOnly && process.env.GITHUB_BASE_REF) {
+    cliArgs.push('--pr');
+  }
+
+  cliArgs.push('--path', scanPath);
+
+  if (preset === 'strict') {
+    cliArgs.push('--strict');
+  } else if (preset === 'security') {
+    cliArgs.push('--security');
+  }
+
+  cliArgs.push('--fail-on', failOn);
+  cliArgs.push('--sarif-output', sarifOutputPath);
+  cliArgs.push('--sarif');
 
   // ── Run ai-guard ──────────────────────────────────────────────────────────
   startGroup('AI Guard — Scan results');
 
   const result = spawnSync(
     'npx',
-    ['--yes', 'ai-guard', ...args.split(' ').filter(Boolean)],
+    ['--yes', 'ai-guard', ...cliArgs],
     {
       cwd,
       stdio: 'inherit',
-      shell: true,
+      shell: false,
       env: {
         ...process.env,
         FORCE_COLOR: '1',
@@ -157,8 +162,21 @@ async function main() {
       const sarif = JSON.parse(fs.readFileSync(sarifOutputPath, 'utf-8'));
       const runs = sarif.runs ?? [];
       for (const run of runs) {
-        issuesFound += (run.results ?? []).length;
-        filesScanned += (run.artifacts ?? []).length;
+        const results = run.results ?? [];
+        issuesFound += results.length;
+
+        // Count confidence levels from SARIF result properties.precision
+        for (const result of results) {
+          const precision = result.properties?.precision;
+          if (precision === 'high') {
+            highCount++;
+          } else if (precision === 'medium') {
+            mediumCount++;
+          }
+        }
+
+        // filesScanned is stored in run.properties by the SARIF builder
+        filesScanned += run.properties?.filesScanned ?? 0;
         durationMs = run.properties?.durationMs ?? durationMs;
       }
     } catch {
@@ -181,7 +199,9 @@ async function main() {
   // ── Exit with correct code ────────────────────────────────────────────────
   // The CLI already exited with the right code via process.exit.
   // When using spawnSync, we propagate that code.
-  if (result.status !== null && result.status !== 0) {
+  // A null status means the child was killed by a signal (e.g. OOM/SIGKILL) —
+  // that must be treated as a failure, not a success.
+  if (result.status !== 0) {
     if (failOn === 'none') {
       // Report-only mode — never fail the workflow
       info('fail-on: none — findings reported but not failing build.');

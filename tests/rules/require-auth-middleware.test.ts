@@ -123,3 +123,56 @@ ruleTester.run('require-auth-middleware', requireAuthMiddleware, {
     },
   ],
 });
+
+// ─── C3 Regression: router state leak across router instances ───────────────
+
+ruleTester.run('require-auth-middleware (C3: per-router auth tracking)', requireAuthMiddleware, {
+  valid: [
+    // Router A has auth -- routes on router A should not be reported
+    {
+      code: `
+        const adminRouter = express.Router();
+        adminRouter.use(authMiddleware);
+        adminRouter.get('/admin', adminHandler);
+        adminRouter.post('/admin', createAdmin);
+      `,
+    },
+    // Single router with use(auth) -- existing behavior preserved
+    {
+      code: `
+        router.use(protect);
+        router.get('/data', handler);
+        router.post('/data', handler);
+      `,
+    },
+  ],
+  invalid: [
+    // Router B has NO auth -- routes on router B MUST still be reported
+    // even when router A has auth (the old bug leaked auth state globally)
+    {
+      code: `
+        const adminRouter = express.Router();
+        adminRouter.use(authMiddleware);
+        adminRouter.get('/admin', adminHandler);
+
+        const publicRouter = express.Router();
+        publicRouter.get('/api/data', publicHandler);
+      `,
+      errors: [{ messageId: 'missingAuth' }],
+    },
+    // Two separate routers -- neither has auth, both should be reported
+    {
+      code: `
+        const routerA = express.Router();
+        routerA.get('/a', handlerA);
+
+        const routerB = express.Router();
+        routerB.get('/b', handlerB);
+      `,
+      errors: [
+        { messageId: 'missingAuth' },
+        { messageId: 'missingAuth' },
+      ],
+    },
+  ],
+});

@@ -12,7 +12,7 @@ const createRule = ESLintUtils.RuleCreator(
 
 const FRAMEWORK_FILE_PATTERNS = [
   // Next.js App Router
-  /[/\\]route\.(ts|js|tsx|jsx)$/,
+  [/[/\\]route\.(ts|js|tsx|jsx)$/,
   /[/\\]middleware\.(ts|js)$/,
   /[/\\]layout\.(tsx|jsx|ts|js)$/,
   /[/\\]page\.(tsx|jsx|ts|js)$/,
@@ -240,7 +240,7 @@ export interface RuleOptions {
   ignoreHandlerFunctions?: boolean;
 }
 
-export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait' | 'asyncPassThrough'>({
+export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait' | 'asyncPassThrough' | 'addAwait'>({
   name: 'no-async-without-await',
   meta: {
     type: 'suggestion',
@@ -248,7 +248,8 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
       description:
         'Disallow async functions that never use await. AI tools frequently add async by default, creating misleading signatures and unnecessary Promise wrappers. Framework-specific async conventions (Next.js route handlers, React event handlers) are excluded.',
     },
-    fixable: 'code',
+    fixable: undefined,
+    hasSuggestions: true,
     schema: [
       {
         type: 'object',
@@ -280,6 +281,7 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
         'Async function does not contain `await`. AI tools frequently add `async` unnecessarily, which can mislead callers and mask intent. Remove `async` or add proper await logic.',
       asyncPassThrough:
         'Async pass-through wrapper — this may be intentional for Promise propagation. Consider whether `async` is needed here.',
+      addAwait: 'Add `await` to the expression to make the async function meaningful.',
     },
   },
   defaultOptions: [{}],
@@ -300,17 +302,32 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
     const isFrameworkFile = FRAMEWORK_FILE_PATTERNS.some((pattern) => pattern.test(filename));
     const isReactFile = REACT_FILE_EXTENSIONS.has(fileExt);
 
-    function buildSafeAutofix(
+    function buildSuggestion(
       node:
         | TSESTree.FunctionDeclaration
         | TSESTree.FunctionExpression
         | TSESTree.ArrowFunctionExpression,
-    ): ((fixer: TSESLint.RuleFixer) => TSESLint.RuleFix | null) | undefined {
+    ): TSESLint.SuggestionReportDescriptor<'addAwait'>[] | undefined {
       const sourceCode = context.sourceCode;
 
+      // Only suggest adding await for expressions that could reasonably be
+      // promises (CallExpression or MemberExpression). For literals,
+      // identifiers, and other non-promise expressions, adding await is
+      // semantically nonsensical (e.g. `return await (1)`) so we don't
+      // offer the suggestion.
       if (node.body.type !== AST_NODE_TYPES.BlockStatement) {
-        const exprText = sourceCode.getText(node.body);
-        return (fixer) => fixer.replaceText(node.body, `await (${exprText})`);
+        const body = node.body;
+        if (
+          body.type === AST_NODE_TYPES.CallExpression ||
+          body.type === AST_NODE_TYPES.MemberExpression
+        ) {
+          const exprText = sourceCode.getText(body);
+          return [{
+            messageId: 'addAwait',
+            fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(body, `await (${exprText})`),
+          }];
+        }
+        return undefined;
       }
 
       if (node.body.body.length !== 1) {
@@ -324,15 +341,33 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
         onlyStatement.argument &&
         onlyStatement.argument.type !== AST_NODE_TYPES.AwaitExpression
       ) {
-        const returnValueText = sourceCode.getText(onlyStatement.argument);
-        return (fixer) =>
-          fixer.replaceText(onlyStatement.argument as TSESTree.Node, `await (${returnValueText})`);
+        const arg = onlyStatement.argument;
+        // Only suggest for call expressions or member expressions (potential promises)
+        if (
+          arg.type === AST_NODE_TYPES.CallExpression ||
+          arg.type === AST_NODE_TYPES.MemberExpression
+        ) {
+          const returnValueText = sourceCode.getText(arg);
+          return [{
+            messageId: 'addAwait',
+            fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(arg as TSESTree.Node, `await (${returnValueText})`),
+          }];
+        }
+        return undefined;
       }
 
       if (onlyStatement.type === AST_NODE_TYPES.ExpressionStatement) {
-        const exprText = sourceCode.getText(onlyStatement.expression);
-        return (fixer) =>
-          fixer.replaceText(onlyStatement.expression as TSESTree.Node, `await (${exprText})`);
+        const expr = onlyStatement.expression;
+        if (
+          expr.type === AST_NODE_TYPES.CallExpression ||
+          expr.type === AST_NODE_TYPES.MemberExpression
+        ) {
+          const exprText = sourceCode.getText(expr);
+          return [{
+            messageId: 'addAwait',
+            fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(expr as TSESTree.Node, `await (${exprText})`),
+          }];
+        }
       }
 
       return undefined;
@@ -404,22 +439,22 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
       // Arrow with non-block body that is not an AwaitExpression
       if (node.body.type !== AST_NODE_TYPES.BlockStatement) {
         if (node.body.type !== AST_NODE_TYPES.AwaitExpression) {
-          const fix = buildSafeAutofix(node);
+          const suggest = buildSuggestion(node);
           context.report({
             node,
             messageId: 'asyncWithoutAwait',
-            fix,
+            suggest,
           });
         }
         return;
       }
 
       // Block body with no await
-      const fix = buildSafeAutofix(node);
+      const suggest = buildSuggestion(node);
       context.report({
         node,
         messageId: 'asyncWithoutAwait',
-        fix,
+        suggest,
       });
     }
 
