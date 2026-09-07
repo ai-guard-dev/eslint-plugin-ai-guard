@@ -19,11 +19,11 @@ const AUTHZ_HELPER_NAMES = [
 
 // ─── Context detection (shared with require-auth-middleware) ──────────────────
 const ELECTRON_PATH_PATTERNS = [
-  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /preload\.js$/, /background\.js$/,
+  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /\bpreload\.js$/, /\bbackground\.js$/,
 ];
 const INTERNAL_SCRIPT_PATTERNS = [
   /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
-  /[\\/]debug[\\/]/i, /seed\./i, /migrate?\./i, /setup\./i,
+  /[\\/]debug[\\/]/i, /\bseed\./i, /\bmigrat(?:e|ion)\./i, /\bsetup\./i,
 ];
 function isElectronOrInternalFile(filePath: string): boolean {
   return (
