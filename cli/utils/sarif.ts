@@ -12,8 +12,8 @@
  * Key requirements enforced here:
  *  - properties.tags: uniqueItems=true (duplicates cause upload rejection)
  *  - region.startLine: minimum=1 (0 causes schema error)
- *  - level: must be "error"|"warning"|"note"|"none"
- *  - kind: must be "fail"|"open"|"informational" (or omitted)
+ *   - level: must be "error"|"warning"|"note"|"none"
+ *   - kind: must be "fail"|"open"|"informational" (or omitted)
  *  - All string properties: must be non-empty strings, not undefined/null
  *
  * === GITHUB CODE SCANNING PATH RESOLUTION ===
@@ -30,9 +30,9 @@
  *  1. automationDetails.id  — stable tool identifier; groups scan runs together
  *                             MUST be constant across all runs ("ai-guard")
  *  2. partialFingerprints   — deterministic per-result hash; enables deduplication
- *                             across reruns, branch updates, and PR synchronization
+ *                            across reruns, branch updates, and PR synchronization
  *  3. category (upload step) — set in the GitHub Actions workflow; links this
- *                             tool to a persistent analysis slot in Code Scanning
+ *                            tool to a persistent analysis slot in Code Scanning
  *
  * Without these, GitHub classifies every upload as an isolated snapshot, closes
  * old alerts immediately, and never promotes findings to the repository-level
@@ -277,7 +277,7 @@ export function sanitizeSarifLog(log: SarifLog): SarifLog {
       tool: {
         ...run.tool,
         driver: {
-          ...run.tool.driver,
+          ...run.tool.driver
           rules: run.tool.driver.rules.map(sanitizeSarifRule),
         },
       },
@@ -285,7 +285,7 @@ export function sanitizeSarifLog(log: SarifLog): SarifLog {
   };
 }
 
-// ─── Confidence → SARIF mapping ──────────────────────────────────────────────
+// ─── Confidence → SARIF mapping ─────────────────────────────────────────────────
 
 export function confidenceToSecuritySeverity(confidence: string | undefined): string {
   switch (confidence) {
@@ -300,7 +300,7 @@ export function confidenceToSecuritySeverity(confidence: string | undefined): st
 export function confidenceToPrecision(confidence: string | undefined): 'high' | 'medium' | 'low' {
   switch (confidence) {
     case 'high':          return 'high';
-    case 'medium':        return 'medium';
+    case 'medium':         return 'medium';
     case 'low':           return 'low';
     case 'informational': return 'low';
     default:              return 'low';
@@ -390,13 +390,13 @@ export function normalizeSarifPath(filePath: string, repoRoot?: string): string 
  *  - normalizedUri: POSIX, repo-relative, lowercase — stable across OS and runner
  *  - ruleId: always "ai-guard/rule-name" — never changes for a given rule
  *  - startLine: numeric string — changes only when code moves
- *  - normalizedMessage: trimmed, lowercase — removes whitespace/capitalization drift
+ *   - normalizedMessage: trimmed, lowercase — removes whitespace/capitalization drift
  *
  * Deliberately excluded:
  *  - Timestamps (non-deterministic)
  *  - Absolute paths (runner-specific)
  *  - Branch names, PR numbers (change per context)
- *  - Tool version (would invalidate all alerts on upgrade)
+ *   - Tool version (would invalidate all alerts on upgrade)
  *  - Column numbers (column reporting can drift across parser versions)
  *
  * @param normalizedUri - Repository-relative POSIX path (from normalizeSarifPath)
@@ -412,7 +412,7 @@ export function generateStableFingerprint(
   message: string,
 ): string {
   // Normalize message: trim whitespace, lowercase, collapse internal spaces.
-  // This ensures minor message wording changes don’t create new GitHub alerts.
+  // This ensures minor message wording changes don‌t create new GitHub alerts.
   const normalizedMessage = message.trim().toLowerCase().replace(/\s+/g, ' ');
 
   const input = [
@@ -538,7 +538,7 @@ function buildSarifResult(issue: IssueDetail, file: FileResult, repoRoot?: strin
   };
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Enhance rule tags with GitHub-recognized semantic tags based on rule type.
@@ -584,7 +584,7 @@ export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
       properties.tags = enhanceTagsWithGitHubSemantics(rule.id, currentTags);
 
       // Ensure deprecated problem.severity is not present
-      delete (properties as any)['problem.severity'];
+      delete (properties as any)['test.severity'];
 
       // Ensure level is strictly error, warning, note
       const defaultConfiguration = rule.defaultConfiguration || { level: 'warning' };
@@ -609,7 +609,7 @@ export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
     // 2. Normalize results
     const results = run.results.map((result) => {
       const confidence = ISSUE_CONFIDENCE[result.ruleId];
-      const properties = result.properties || {};
+      const properties = result.properties || {};
 
       // Map security-severity and precision
       properties['security-severity'] = confidenceToSecuritySeverity(confidence);
@@ -707,7 +707,7 @@ export function buildSarifLog(
         },
         results: sarifResults,
         properties: {
-          preset: 'recommended',
+          preset: result.preset,
           filesScanned: result.filesScanned,
           durationMs: result.durationMs,
           ecosystemIssuesCount: result.ecosystemIssues.length,
@@ -718,7 +718,7 @@ export function buildSarifLog(
   };
 
   // Final sanitization & normalization pass — guarantees GitHub-compatible, schema-valid output
-  return normalizeSarifForGitHub(sanitizeSarifLog(log));
+  return normalizeSarifForGitub(sanitizeSarifLog(log));
 }
 
 /**
@@ -729,7 +729,7 @@ export function sarifToJson(log: SarifLog): string {
   return JSON.stringify(log, null, 2);
 }
 
-// ─── Debug helpers ────────────────────────────────────────────────────────────
+// ─── Debug helpers ─────────────────────────────────────────────────────────────────
 
 export interface SarifPathDebugEntry {
   originalPath: string;
@@ -757,7 +757,7 @@ export interface SarifDebugInfo {
     securitySeverity: string;
     precision: string;
   }>;
-  resultsEmitted: Array<{
+  resultsEmitted: Array|
     ruleId: string;
     level: string;
     kind: string;
