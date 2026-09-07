@@ -171,5 +171,15 @@ ruleTester.run('no-catch-without-use', noCatchWithoutUse, {
       `,
       errors: [{ messageId: 'unusedCatchParam' }],
     },
+    // M3: Variable name in a string literal should NOT count as usage
+    {
+      code: `
+        try { doSomething(); }
+        catch (error) {
+          console.log("error occurred");
+        }
+      `,
+      errors: [{ messageId: 'unusedCatchParam' }],
+    },
   ],
 });

@@ -59,8 +59,6 @@ ruleTester.run('no-hardcoded-secret', noHardcodedSecret, {
         };
       `,
     },
-    // 12. Test file path — real sk- prefixed token should be flagged (even sk-test- ones)
-    // This moved to invalid because sk-test-* tokens can be real API keys
     // 12. Constant with env var default (different from literal)
     {
       code: `const TEST_API_KEY = process.env.TEST_API_KEY ?? 'fallback';`,
@@ -76,6 +74,26 @@ ruleTester.run('no-hardcoded-secret', noHardcodedSecret, {
     // 15. Secret used as type annotation (TS interface)
     {
       code: `const PLACEHOLDER = 'INSERT_API_KEY_HERE';`,
+    },
+    // H5: Hash/digest/encrypted variable names should not be flagged
+    {
+      code: `const passwordHash = bcrypt.hashSync('mysecret123', 10);`,
+    },
+    {
+      code: `const apiKeyValidator = new Validator('check-api-key-format-1234567890');`,
+    },
+    {
+      code: `const secretLevel = getGameLevel('advanced-secret-level-string');`,
+    },
+    {
+      code: `const tokenDigest = computeDigest('sha256-of-some-token-value');`,
+    },
+    // M8: Case-insensitive false positive values
+    {
+      code: `const apiKey = 'YOUR_API_KEY';`,
+    },
+    {
+      code: `const secret = 'YOUR_SECRET';`,
     },
   ],
   invalid: [

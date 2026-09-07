@@ -146,5 +146,28 @@ ruleTester.run('no-dead-branch', noDeadBranch, {
       `,
       errors: [{ messageId: 'alwaysFalse' }],
     },
+    // H2: Non-zero numeric literals are always truthy
+    {
+      code: `if (1) { doSomething(); }`,
+      errors: [{ messageId: 'alwaysTrue' }],
+    },
+    {
+      code: `if (2) { doSomething(); }`,
+      errors: [{ messageId: 'alwaysTrue' }],
+    },
+    {
+      code: `if (42) { doSomething(); }`,
+      errors: [{ messageId: 'alwaysTrue' }],
+    },
+    // M4: null is always falsy
+    {
+      code: `if (null) { doSomething(); }`,
+      errors: [{ messageId: 'alwaysFalse' }],
+    },
+    // M4: undefined is always falsy
+    {
+      code: `if (undefined) { doSomething(); }`,
+      errors: [{ messageId: 'alwaysFalse' }],
+    },
   ],
 });
