@@ -674,7 +674,7 @@ export const noAwaitInLoop = createRule({
             break;
           }
 
-          if (LOOP_TY<ES.has(ancestor.type as AST_NODE_TYPES)) {
+          if (LOOP_TYPES.has(ancestor.type as AST_NODE_TYPES)) {
             enclosingLoop = ancestor as LoopNode;
             break;
           }
