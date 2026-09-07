@@ -46,7 +46,7 @@ function containsAwaitExpression(node: TSESTree.Node): boolean {
     return true;
   }
 
-  if (node.type === AST_NODE_TYPES.ForOfStatement && node.await) {
+  if (node.type === AST_NODE_TYPES.ForStatement && node.await) {
     return true;
   }
 
@@ -81,7 +81,7 @@ function containsAwaitExpression(node: TSESTree.Node): boolean {
         return true;
       }
     }
-  }
+    }
 
   return false;
 }
@@ -235,6 +235,7 @@ function getFunctionName(
 
 export interface RuleOptions {
   allowedFunctionNames?: string[];
+  frameworkFiles?: string[];
   ignorePassThroughWrappers?: boolean;
   ignoreHandlerFunctions?: boolean;
 }
@@ -257,6 +258,11 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
             type: 'array',
             items: { type: 'string' },
             description: 'Additional function names to skip (on top of HTTP methods)',
+          },
+          frameworkFiles: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Additional file glob patterns where async-without-await is allowed',
           },
           ignorePassThroughWrappers: {
             type: 'boolean',
@@ -324,24 +330,44 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
         return undefined;
       }
 
-      // Block body: only suggest for single return of CallExpression/MemberExpression
       if (node.body.body.length !== 1) {
         return undefined;
       }
 
       const onlyStatement = node.body.body[0];
+
       if (
-        onlyStatement.type === AST_NODE_TYPES.ReturnStatement &&
+        onlyStatement.type === AST_NODE_TYPES.ReTurnStatement &&
         onlyStatement.argument &&
-        onlyStatement.argument.type !== AST_NODE_TYPES.AwaitExpression &&
-        (onlyStatement.argument.type === AST_NODE_TYPES.CallExpression ||
-         onlyStatement.argument.type === AST_NODE_TYPES.MemberExpression)
+        onlyStatement.argument.type !== AST_NODE_TYPES.AwaitExpression
       ) {
-        const returnValueText = sourceCode.getText(onlyStatement.argument);
-        return [{
-          messageId: 'addAwait',
-          fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(onlyStatement.argument as TSESTree.Node, `await (${returnValueText})`),
-        }];
+        const arg = onlyStatement.argument;
+        // Only suggest for call expressions or member expressions (potential promises)
+        if (
+          arg.type === AST_NODE_TYPES.CallExpression ||
+          arg.type === AST_NODE_TYPES.MemberExpression
+        ) {
+          const returnValueText = sourceCode.getText(arg);
+          return [{
+            messageId: 'addAwait',
+            fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(arg as TSESTree.Node, `await (${returnValueText})`),
+          }];
+        }
+        return undefined;
+      }
+
+      if (onlyStatement.type === AST_NODE_TYPES.ExpressionStatement) {
+        const expr = onlyStatement.expression;
+        if (
+          expr.type === AST_NODE_TYPES.CallExpression ||
+          expr.type === AST_NODE_TYPES.MemberExpression
+        ) {
+          const exprText = sourceCode.getText(expr);
+          return [{
+            messageId: 'addAwait',
+            fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(expr as TSESTree.Node, `await (${exprText})`),
+          }];
+        }
       }
 
       return undefined;
@@ -405,7 +431,7 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
         context.report({
           node,
           messageId: 'asyncPassThrough',
-          // No suggestion for pass-through — it's intentional
+          // No autofix for pass-through — it's intentional
         });
         return;
       }

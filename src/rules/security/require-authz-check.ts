@@ -5,230 +5,262 @@ const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
 );
 
-// ─── Safe internal file patterns ─────────────────────────────────────────────
-// Files where authorization checks may be intentionally omitted (e.g., public
-// endpoints, health checks, internal tooling).
-
-const INTERNAL_FILE_PATTERNS = [
-  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /\bpreload\.js$/, /\bbackground\.js$/,
-  /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
-  /[\\/]debug[\\/]/i, /\bseed\./i, /\bmigrat(?:e|ion)\./i, /\bsetup\./i,
-  /[\\/]scaffold[\\/]/i, /\btest[-_].*\.js$/i, /[\\/]__tests__[\\/]/i,
-  /[\\/]test[\\/]/i, /[\\/]tests[\\/]/i, /\.(spec|test)\./i,
-  /[\\/]fixtures[\\/]/i, /\bmock/i, /\bstub/i,
-];
-
-// ─── Authorization helper function names ─────────────────────────────────────
-// Functions that typically perform authorization checks.
-
+const ROUTE_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 const AUTHZ_HELPER_NAMES = [
-  'checkPermission', 'checkAuth', 'authorize', 'authorizeRequest',
-  'hasPermission', 'canAccess', 'isAuthorized', 'verifyAccess',
-  'ensureAuthorized', 'requireAuth', 'requirePermission',
+  'authorize',
+  'authorise',
+  'checkOwnership',
+  'ensureOwner',
+  'isOwner',
+  'canAccess',
+  'canModify',
+  'hasAccess',
 ] as const;
 
-// ─── Resource ID access patterns ─────────────────────────────────────────────
-// Patterns that suggest access to a resource identifier (e.g., req.params.id).
+// ─── Context detection (shared with require-auth-middleware) ──────────────────
+const ELECTRON_PATH_PATTERNS = [
+  /[\\/]electron[\\/]/i, /[\\/]electron-main/i, /preload\.js$/, /background\.js$/,
+];
+const INTERNAL_SCRIPT_PATTERNS = [
+  /[\\/]scripts[\\/]/i, /[\\/]migrations?[\\/]/i, /[\\/]seeds?[\\/]/i,
+  /[\\/]debug[\\/]/i, /seed\./i, /migrat(?:e|ion)\./i, /setup\./i,
+];
+function isElectronOrInternalFile(filePath: string): boolean {
+  return (
+    ELECTRON_PATH_PATTERNS.some((p) => p.test(filePath)) ||
+    INTERNAL_SCRIPT_PATTERNS.some((p) => p.test(filePath))
+  );
+}
 
-function isLikelyResourceIdPath(path: string[] | null): boolean {
-  if (!path || path.length < 2) return false;
-  const joined = path.join('.');
-  // req.params.id, ctx.params.id, request.params.slug, etc.
-  if (path[0] === 'req' || path[0] === 'ctx' || path[0] === 'request') {
-    if (path[1] === 'params' || path[1] === 'query') return true;
+function isRouteRegistrationCall(node: TSESTree.CallExpression): boolean {
+  if (
+    node.callee.type !== AST_NODE_TYPES.MemberExpression ||
+    node.called.property.type !== AST_NODE_TYPES.Identifier
+  ) {
+    return false;
   }
-  // req.user.id, ctx.state.user.id, etc.
-  if (joined.includes('user') && (joined.includes('id') || joined.includes('Id'))) return true;
-  return false;
+
+  if (!ROUTE_METHODS.includes(node.callee.property.name as (typeof ROUTE_METHODS)[number])) {
+    return false;
+  }
+
+  const firstArg = node.arguments[0];
+  if (!firstArg) {
+    return false;
+  }
+
+  return (
+    (firstArg.type === AST_NODE_TYPES.Literal && typeof firstArg.value === 'string') ||
+    (firstArg.type === AST_NODE_TYPES.TemplateLiteral && firstArg.expressions.length === 0)
+  );
 }
 
-function isReqUserPath(path: string[] | null): boolean {
-  if (!path) return false;
-  if (path[0] === 'req' && path[1] === 'user') return true;
-  if (path[0] === 'ctx' && path[1] === 'state' && path[2] === 'user') return true;
-  if (path[0] === 'request' && path[1] === 'user') return true;
-  return false;
-}
+function getStaticPathArg(node: TSESTree.CallExpression): string | null {
+  const firstArg = node.arguments[0];
+  if (!firstArg) return null;
 
-function getMemberPath(node: TSESTree.Node): string[] | null {
-  const parts: string[] = [];
-  let current: TSESTree.Node | undefined = node;
+  if (firstArg.type === AST_NODE_TYPES.Literal && typeof firstArg.value === 'string') {
+    return firstArg.value;
+  }
 
-  while (current) {
-    if (current.type === AST_NODE_TYPES.MemberExpression) {
-      if (current.property.type === AST_NODE_TYPES.Identifier) {
-        parts.unshift(current.property.name);
-      } else {
-        return null;
-      }
-      current = current.object;
-    } else if (current.type === AST_NODE_TYPES.Identifier) {
-      parts.unshift(current.name);
-      return parts;
-    } else {
-      return null;
-    }
+  if (firstArg.type === AST_NODE_TYPES.TemplateLiteral && firstArg.expressions.length === 0) {
+    return firstArg.quasis[0]?.value.cooked ?? null;
   }
 
   return null;
 }
 
-// ─── Rule implementation ─────────────────────────────────────────────────────
+function getMemberPath(node: TSESTree.Node): string[] | null {
+  if (node.type === AST_NODE_TYPES.Identifier) {
+    return [node.name];
+  }
 
-export interface RuleOptions {
-  ignoreInternalFiles?: boolean;
-  ignoreTestFiles?: boolean;
+  if (node.type !== AST_NODE_TYPES.MemberExpression || node.computed) {
+    return null;
+  }
+
+  const objectPath = getMemberPath(node.object);
+  if (!objectPath) {
+    return null;
+  }
+
+  if (node.property.type !== AST_NODE_TYPES.Identifier) {
+    return null;
+  }
+
+  return [...objectPath, node.property.name];
 }
 
-export const requireAuthzCheck = createRule<[RuleOptions], 'missingAuthzCheck'>({
-  name: 'require-authz-check',
-  meta: {
-    type: 'problem',
-    docs: {
-      description:
-        'Require authorization checks in route handlers that access resource identifiers. AI tools frequently generate CRUD routes without permission checks, creating IDOR vulnerabilities.',
-    },
-    schema: [
-      {
-        type: 'object',
-        properties: {
-          ignoreInternalFiles: {
-            type: 'boolean',
-            description: 'Skip files matching internal file patterns (scripts, migrations, tests). Default: true.',
-          },
-          ignoreTestFiles: {
-            type: 'boolean',
-            description: 'Skip test files (*.spec.ts, *.test.ts, __tests__/). Default: true.',
-          },
-        },
-        additionalProperties: false,
-      },
-    ],
-    messages: {
-      missingAuthzCheck:
-        'Route handler accesses a resource identifier (e.g., req.params.id) without an authorization check. This may be an IDOR vulnerability. Add a permission check (e.g., checkPermission(), authorize()) before accessing the resource.',
-    },
-  },
-  defaultOptions: [{ ignoreInternalFiles: true, ignoreTestFiles: true }],
-  create(context, [options]) {
-    const { ignoreInternalFiles = true, ignoreTestFiles = true } = options;
+function hasPathPrefix(path: string[] | null, prefix: readonly string[]): boolean {
+  if (!path || path.length < prefix.length) {
+    return false;
+  }
 
-    const filename = context.filename ?? context.getFilename?.() ?? '';
+  for (let i = 0; i < prefix.length; i += 1) {
+    if (path[i] !== prefix[i]) {
+      return false;
+    }
+  }
 
-    // Check if this is an internal file
-    if (ignoreInternalFiles && INTERNAL_FILE_PATTERNS.some((p) => p.test(filename))) {
-      return {};
+  return true;
+}
+
+function isLikelyResourceIdPath(path: string[] | null): boolean {
+  if (!path || path.length < 3) {
+    return false;
+  }
+
+  if (!hasPathPrefix(path, ['req', 'params']) && !hasPathPrefix(path, ['req', 'body']) && !hasPathPrefix(path, ['req', 'query'])) {
+    return false;
+  }
+
+  const last = path[path.length - 1].toLowerCase();
+  return last === 'id' || last.endsWith('id');
+}
+
+function isReqUserPath(path: string[] | null): boolean {
+  return hasPathPrefix(path, ['req', 'user']);
+}
+
+function containsAuthorizationHelper(node: TSESTree.Node): boolean {
+  if (
+    node.type === AST_NODE_TYPES.CallExpression &&
+    ((node.callee.type === AST_NODE_TYPES.Identifier &&
+      AUTHZ_HELPER_NAMES.includes(node.callee.name as (typeof AUTHZ_HELPER_NAMES)[number])) ||
+      (node.callee.type === AST_NODE_TYPES.MemberExpression &&
+        node.callee.property.type === AST_NODE_TYPES.Identifier &&
+        AUTHZ_HELPER_NAMES.includes(node.callee.property.name as (typeof AUTHZ_HELPER_NAMES)[number])))
+  ) {
+    return true;
+  }
+
+  const entries = Object.entries(node) as Array<[string, unknown]>;
+  for (const [key, value] of entries) {
+    if (key === 'parent') continue;
+
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (child && typeof child === 'object' && 'type' in child) {
+          if (containsAuthorizationHelper(child as TSESTree.Node)) return true;
+        }
+      }
+      continue;
     }
 
-    // Check if this is a test file
-    if (ignoreTestFiles && /\.(spec|test)\./.test(filename)) {
-      return {};
+    if (value && typeof value === 'object' && 'type' in value) {
+      if (containsAuthorizationHelper(value as TSESTree.Node)) return true;
+    }
+  }
+
+  return false;
+}
+
+function collectBodySignals(node: TSESTree.Node): { hasResourceIdAccess: boolean; hasOwnershipCheck: boolean } {
+  let hasResourceIdAccess = false;
+  let hasOwnershipCheck = false;
+
+  const walk = (current: TSESTree.Node): void => {
+    if (
+      current.type === AST_NODE_TYPES.BinaryExpression &&
+      ['===', '==', '!==', '!='].includes(current.operator)
+    ) {
+      const leftPath = getMemberPath(current.left);
+      const rightPath = getMemberPath(current.right);
+
+      const leftIsUser = isReqUserPath(leftPath);
+      const rightIsUser = isReqUserPath(rightPath);
+      const leftIsResource = isLikelyResourceIdPath(leftPath);
+      const rightIsResource = isLikelyResourceIdPath(rightPath);
+
+      if ((leftIsUser && rightIsResource) || (rightIsUser && leftIsResource)) {
+        hasOwnershipCheck = true;
+      }
     }
 
-    // NOTE: containsAuthorizationHelper was removed as part of the H8 fix.
-    // The authorization helper check is now inlined in collectBodySignals to
-    // avoid O(n²) traversal.
+    if (current.type === AST_NODE_TYPES.MemberExpression) {
+      const path = getMemberPath(current);
+      if (isLikelyResourceIdPath(path)) {
+        hasResourceIdAccess = true;
+      }
+    }
 
-    function collectBodySignals(node: TSESTree.Node): { hasResourceIdAccess: boolean; hasOwnershipCheck: boolean; hasAuthzHelper: boolean } {
-      let hasResourceIdAccess = false;
-      let hasOwnershipCheck = false;
-      let hasAuthzHelper = false;
+    if (containsAuthorizationHelper(current)) {
+      hasOwnershipCheck = true;
+    }
 
-      const walk = (current: TSESTree.Node): void => {
-        if (
-          current.type === AST_NODE_TYPES.BinaryExpression &&
-          ['===', '==', '!==', '!='].includes(current.operator)
-        ) {
-          const leftPath = getMemberPath(current.left);
-          const rightPath = getMemberPath(current.right);
+    const entries = Object.entries(current) as Array<[string, unknown]>;
+    for (const [key, value] of entries) {
+      if (key === 'parent') continue;
 
-          const leftIsUser = isReqUserPath(leftPath);
-          const rightIsUser = isReqUserPath(rightPath);
-          const leftIsResource = isLikelyResourceIdPath(leftPath);
-          const rightIsResource = isLikelyResourceIdPath(rightPath);
-
-          if ((leftIsUser && rightIsResource) || (rightIsUser && leftIsResource)) {
-            hasOwnershipCheck = true;
-          }
-        }
-
-        if (current.type === AST_NODE_TYPES.MemberExpression) {
-          const path = getMemberPath(current);
-          if (isLikelyResourceIdPath(path)) {
-            hasResourceIdAccess = true;
-          }
-        }
-
-        if (
-          current.type === AST_NODE_TYPES.CallExpression &&
-          current.callee.type === AST_NODE_TYPES.Identifier &&
-          AUTHZ_HELPER_NAMES.includes(current.callee.name as (typeof AUTHZ_HELPER_NAMES)[number])
-        ) {
-          hasAuthzHelper = true;
-        }
-
-        if (
-          current.type === AST_NODE_TYPES.CallExpression &&
-          current.callee.type === AST_NODE_TYPES.MemberExpression &&
-          current.callee.property.type === AST_NODE_TYPES.Identifier &&
-          AUTHZ_HELPER_NAMES.includes(current.callee.property.name as (typeof AUTHZ_HELPER_NAMES)[number])
-        ) {
-          hasAuthzHelper = true;
-        }
-
-        // Don't traverse into nested functions
-        if (
-          current.type === AST_NODE_TYPES.FunctionDeclaration ||
-          current.type === AST_NODE_TYPES.FunctionExpression ||
-          current.type === AST_NODE_TYPES.ArrowFunctionExpression
-        ) {
-          return;
-        }
-
-        // Recurse into children
-        for (const child of (current as unknown as Record<string, unknown[]>)['body'] ?? []) {
+      if (Array.isArray(value)) {
+        for (const child of value) {
           if (child && typeof child === 'object' && 'type' in child) {
             walk(child as TSESTree.Node);
           }
         }
-      };
-
-      if (node.type === AST_NODE_TYPES.BlockStatement) {
-        for (const stmt of node.body) {
-          walk(stmt);
-        }
-      } else {
-        walk(node);
+        continue;
       }
 
-      return { hasResourceIdAccess, hasOwnershipCheck, hasAuthzHelper };
+      if (value && typeof value === 'object' && 'type' in value) {
+        walk(value as TSESTree.Node);
+      }
     }
+  };
 
-    function isRouteHandler(node: TSESTree.FunctionDeclaration | TSESTree.FunctionExpression | TSESTree.ArrowFunctionExpression): boolean {
-      const funcName = node.id?.name ?? '';
-      if (['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(funcName)) {
-        return true;
-      }
-      if (funcName.startsWith('handle') || funcName.startsWith('on')) {
-        return true;
-      }
-      return false;
-    }
+  walk(node);
+
+  return { hasResourceIdAccess, hasOwnershipCheck };
+}
+
+export const requireAuthzCheck = createRule({
+  name: 'require-authz-check',
+  meta: {
+    type: 'suggestion',
+    docs: {
+      description:
+        'Require a visible authorization/ownership check when route handlers access resource identifiers (e.g., req.params.id). AI tools often add auth middleware but forget per-resource authorization checks.',
+    },
+    fixable: undefined,
+    schema: [],
+    messages: {
+      missingAuthz:
+        'Handler accesses resource identifiers (e.g., req.params.id) without a visible authorization check. Verify ownership or permission is enforced before the resource is returned or modified.',
+    },
+  },
+  defaultOptions: [],
+  create(context) {
+    // Suppress in Electron/internal files — auth is not relevant in these contexts
+    const filePath = context.filename ?? context.getFilename?.() ?? '';
+    if (isElectronOrInternalFile(filePath)) return {};
 
     return {
-      'FunctionDeclaration, FunctionExpression, ArrowFunctionExpression'(
-        node: TSESTree.FunctionDeclaration | TSESTree.FunctionExpression | TSESTree.ArrowFunctionExpression,
-      ) {
-        if (!isRouteHandler(node)) return;
+      CallExpression(node) {
+        if (!isRouteRegistrationCall(node)) {
+          return;
+        }
 
-        if (!node.body) return;
+        const routePath = getStaticPathArg(node);
+        const hasRouteIdParam = typeof routePath === 'string' && routePath.includes(':');
 
-        if (node.body.type === AST_NODE_TYPES.BlockStatement) {
-          const signals = collectBodySignals(node.body);
-          if (signals.hasResourceIdAccess && !signals.hasAuthzHelper && !signals.hasOwnershipCheck) {
+        for (const arg of node.arguments) {
+          if (
+            arg.type !== AST_NODE_TYPES.FunctionExpression &&
+            arg.type !== AST_NODE_TYPES.ArrowFunctionExpression
+         ) {
+            continue;
+          }
+
+          if (arg.body.type !== AST_NODE_TYPES.BlockStatement) {
+            continue;
+          }
+
+          const signals = collectBodySignals(arg.body);
+          const isSensitive = hasRouteIdParam && signals.hasResourceIdAccess;
+
+          if (isSensitive && !signals.hasOwnershipCheck) {
             context.report({
-              node,
-              messageId: 'missingAuthzCheck',
+              node: arg,
+              messageId: 'missingAuthz',
             });
           }
         }

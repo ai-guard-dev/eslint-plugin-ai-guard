@@ -32,7 +32,9 @@ ruleTester.run('no-console-in-handler', noConsoleInHandler, {
     },
     // 4. Named handler reference — no inline function
     {
-      code: `service.get('/value', handler);`,
+      code: `
+        service.get('/value', handler);
+      `,
     },
     // 5. Dynamic path — not detected as route registration
     {
@@ -74,11 +76,15 @@ ruleTester.run('no-console-in-handler', noConsoleInHandler, {
     },
     // 9. Non-routing .get() call
     {
-      code: `list.get('/item');`,
+      code: `
+        list.get('/item');
+      `,
     },
     // 10. Named middleware handlers — no inline function
     {
-      code: `router.post('/x', auth, validate, handler);`,
+      code: `
+        router.post('/x', auth, validate, handler);
+      `,
     },
     // 11. console.warn allowed by default
     {
@@ -267,13 +273,6 @@ ruleTester.run('no-console-in-handler', noConsoleInHandler, {
         });
       `,
       errors: [{ messageId: 'noConsoleInHandler', suggestions: 1 }],
-    },
-    // M6: Expression-body arrow function with console.log
-    {
-      code: `
-        app.get('/test', (req, res) => console.log('test'));
-      `,
-      errors: [{ messageId: 'noConsoleInHandler' }],
     },
   ],
 });

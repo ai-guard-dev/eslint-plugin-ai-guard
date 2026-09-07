@@ -65,7 +65,7 @@ type LoopNode =
   | TSESTree.ForInStatement
   | TSESTree.ForOfStatement
   | TSESTree.WhileStatement
-  | TSESTree.DoWhileStatement;
+  | TSESTree.doWhileStatement;
 
 interface IntentAnalysis {
   isIndependent: boolean;
@@ -386,338 +386,4 @@ function analyzeIntent(loopNode: LoopNode): IntentAnalysis {
         node.type === AST_NODE_TYPES.BreakStatement ||
         node.type === AST_NODE_TYPES.ContinueStatement
       ) {
-        hasEarlyExit = true;
-      }
-
-      if (node.type === AST_NODE_TYPES.TryStatement && node.handler) {
-        let catchHasContinue = false;
-        walkNode(
-          node.handler.body,
-          (catchNode) => {
-            if (catchNode.type === AST_NODE_TYPES.ContinueStatement) {
-              catchHasContinue = true;
-            }
-          },
-          true,
-        );
-
-        if (catchHasContinue) {
-          hasCatchContinue = true;
-        }
-      }
-
-      if (node.type === AST_NODE_TYPES.CallExpression) {
-        if (
-          node.callee.type === AST_NODE_TYPES.MemberExpression &&
-          node.callee.property.type === AST_NODE_TYPES.Identifier
-      ) {
-          const method = node.callee.property.name.toLowerCase();
-          if (MUTATION_METHOD_NAMES.has(method)) {
-            const root = getRootIdentifierName(node.callee.object);
-            if (root && !localBindings.has(root)) {
-              hasSequentialDependency = true;
-            }
-          }
-        }
-      }
-
-      if (node.type === AST_NODE_TYPES.Literal && typeof node.value === 'string') {
-        const lower = node.value.toLowerCase();
-        if (ERROR_CODE_HINTS.some((hint) => lower.includes(hint))) {
-          hasErrorCodeHint = true;
-        }
-      }
-    },
-    true,
-  );
-
-  if (!hasRetryNameHint && siblingStatements.length > 0) {
-    for (const sibling of siblingStatements) {
-      if (nodeContainsErrorCodeHint(sibling)) {
-        hasErrorCodeHint = true;
-      }
-
-      walkNode(
-        sibling,
-        (node) => {
-          if (node.type === AST_NODE_TYPES.Identifier) {
-            checkIdentifierName(node.name);
-          }
-        },
-        true,
-      );
-    }
-  }
-
-  const hasRetryOrFallbackIntent =
-    hasRetryNameHint ||
-    hasCounterIncrement ||
-    hasEarlyExit ||
-    hasCatchContinue ||
-    hasErrorCodeHint ||
-    hasSequentialDependency ||
-    hasControlAwait;
-
-  return {
-    isIndependent: !hasRetryOrFallbackIntent,
-  };
-}
-
-function getLoopBodyStatements(loopNode: LoopNode): TSESTree.Statement[] {
-  return loopNode.body.type === AST_NODE_TYPES.BlockStatement
-    ? loopNode.body.body
-    : [loopNode.body];
-}
-
-function getForOfParamName(loopNode: TSESTree.ForOfStatement): string | null {
-  if (loopNode.left.type === AST_NODE_TYPES.Identifier) {
-    return loopNode.left.name;
-  }
-
-  if (loopNode.left.type === AST_NODE_TYPES.VariableDeclaration) {
-    if (loopNode.left.declarations.length !== 1) return null;
-    const id = loopNode.left.declarations[0].id;
-    if (id.type !== AST_NODE_TYPES.Identifier) return null;
-    return id.name;
-  }
-
-  return null;
-}
-
-/**
- * Minimal glob matcher supporting ** and * wildcards (M12).
- * Converts a glob pattern to a regex and tests it against a file path.
- * Correctly distinguishes `src/test/file.ts` from `src/latest/file.ts`.
- */
-function globMatch(pattern: string, filePath: string): boolean {
-  // Normalize: lowercase, forward slashes
-  const p = pattern.toLowerCase().replace(/\\/g, '/');
-  const f = filePath.toLowerCase().replace(/\\/g, '/');
-
-  // Build regex from glob
-  let regex = '^';
-  for (let i = 0; i < p.length; i++) {
-    const ch = p[i];
-    if (ch === '*') {
-      if (p[i + 1] === '*') {
-        // ** matches any number of path segments (including zero)
-        regex += '.*';
-        i++; // skip the second *
-        // Also skip a trailing slash after **
-        if (p[i + 1] === '/') i++;
-      } else {
-        // * matches anything except path separator
-        regex += '[^/]*';
-      }
-    } else if (ch === '?') {
-      regex += '[^/]';
-    } else if ('^$(){}[]'.includes(ch)) {
-      regex += '\\' + ch;
-    } else {
-      regex += ch;
-    }
-  }
-  regex += '$';
-
-  try {
-    return new RegExp(regex).test(f);
-  } catch {
-    // If regex is invalid, fall back to exact match
-    return p === f;
-  }
-}
-
-function buildSafeAutofix(
-  loopNode: LoopNode,
-  awaitNode: TSESTree.AwaitExpression,
-  sourceCode: Readonly<TSESLint.SourceCode>,
-): string | null {
-  if (
-    !loopNode.parent ||
-    loopNode.parent.type !== AST_NODE_TYPES.BlockStatement ||
-    !loopNode.parent.parent ||
-    !isFunctionNode(loopNode.parent.parent)
-  ) {
-    return null;
-  }
-
-  if (loopNode.type !== AST_NODE_TYPES.ForOfStatement || loopNode.await) {
-    return null;
-  }
-
-  const loopStatements = getLoopBodyStatements(loopNode);
-  if (loopStatements.length !== 1) {
-    return null;
-  }
-
-  const onlyStatement = loopStatements[0];
-  if (
-    onlyStatement.type !== AST_NODE_TYPES.ExpressionStatement ||
-    onlyStatement.expression.type !== AST_NODE_TYPES.AwaitExpression ||
-    onlyStatement.expression !== awaitNode ||
-    onlyStatement.expression.argument.type !== AST_NODE_TYPES.CallExpression
-  ) {
-    return null;
-  }
-
-  const paramName = getForOfParamName(loopNode);
-  if (!paramName) {
-    return null;
-  }
-
-  const iterableText = sourceCode.getText(loopNode.right);
-  const awaitedCallText = sourceCode.getText(onlyStatement.expression.argument);
-
-  return `await Promise.all(${iterableText}).map(async (${paramName}) => await ${awaitedCallText}));`;
-}
-
-export const noAwaitInLoop = createRule({
-  name: 'no-await-in-loop',
-  meta: {
-    type: 'suggestion',
-    docs: {
-      description:
-        'Disallow independent `await` usage inside loops, while allowing intentional retry/fallback/sequential workflows. AI tools frequently generate accidental sequential awaits where Promise.all would be safer and faster. Includes a safe autofix for simple independent loops.',
-    },
-    fixable: 'code',
-    schema: [
-      {
-        type: 'object',
-        properties: {
-          allowPatterns: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'File glob patterns to skip (e.g., **/*.test.ts, **/simulation/**)',
-          },
-        },
-        additionalProperties: false,
-      },
-    ],
-    messages: {
-      awaitInLoop:
-        'Sequential `await` inside a {{loopType}} â€” if these items are independent, consider `Promise.all()` for parallel execution. If sequential order matters, this may be intentional.',
-    },
-  },
-  defaultOptions: [{}],
-  create(context, [options]) {
-    if (hasFileSuppression(context.sourceCode)) {
-      return {};
-    }
-
-    // File-level suppression: test files and simulation/demo files use sequential await intentionally
-    const filename = context.filename ?? context.getFilename?.() ?? '';
-    const fileBasename = path.basename(filename).toLowerCase();
-    const filePath = filename.toLowerCase();
-
-    const isTestFile =
-      fileBasename.includes('.test.') ||
-      fileBasename.includes('.spec.') ||
-      filePath.includes('/__tests__/') ||
-      filePath.includes('/test/') ||
-      filePath.includes('/tests/');
-
-    const isSimulationFile =
-      SIMULATION_NAME_REGEX.test(fileBasename) ||
-      filePath.includes('/simulation/') ||
-      filePath.includes('/demo/') ||
-      filePath.includes('/animation/') ||
-      filePath.includes('/fixtures/');
-
-    // Suppress entirely for test and simulation files
-    if (isTestFile || isSimulationFile) {
-      return {};
-    }
-
-    // Check user-provided allowPatterns using proper glob matching (M12)
-    const { allowPatterns = [] } = options as { allowPatterns?: string[] };
-    for (const pattern of allowPatterns) {
-      if (globMatch(pattern, filePath)) {
-        return {};
-      }
-    }
-
-    const loopIntentCache = new WeakMap<LoopNode, IntentAnalysis>();
-    const reportedLoops = new WeakSet<LoopNode>();
-
-    /**
-     * Track ancestor scope boundaries (functions) so we don't flag await
-     * expressions inside a nested async function that happens to be inside a loop.
-     */
-    const functionBoundary: TSESTree.Node[] = [];
-
-    function enterFunction(node: TSESTree.Node) {
-      functionBoundary.push(node);
-    }
-    function exitFunction() {
-      functionBoundary.pop();
-    }
-
-    return {
-      FunctionDeclaration: enterFunction,
-      FunctionExpression: enterFunction,
-      ArrowFunctionExpression: enterFunction,
-      'FunctionDeclaration:exit': exitFunction,
-      'FunctionExpression:exit': exitFunction,
-      'ArrowFunctionExpression:exit': exitFunction,
-
-      AwaitExpression(node) {
-        // Walk up ancestors looking for a loop, but stop at any function boundary
-        const ancestors = context.sourceCode.getAncestors(node);
-        const currentFunction = functionBoundary[functionBoundary.length - 1];
-
-        let enclosingLoop: LoopNode | null = null;
-        for (let i = ancestors.length - 1; i >= 0; i--) {
-          const ancestor = ancestors[i];
-
-          // Stop if we hit the current function boundary
-          if (ancestor === currentFunction) {
-            break;
-          }
-
-          if (LOOP_TYPES.has(ancestor.type as AST_NODE_TYPES)) {
-            enclosingLoop = ancestor as LoopNode;
-            break;
-          }
-        }
-
-        if (!enclosingLoop) {
-          return;
-        }
-
-        if (reportedLoops.has(enclosingLoop)) {
-          return;
-        }
-
-        if (hasLoopSuppression(enclosingLoop, context.sourceCode)) {
-          return;
-        }
-
-        const intent = loopIntentCache.get(enclosingLoop) ?? analyzeIntent(enclosingLoop);
-        loopIntentCache.set(enclosingLoop, intent);
-
-        // Intent-aware behavior:
-        // retry/fallback/sequential loops are suppressed (no report).
-        if (!intent.isIndependent) {
-          return;
-        }
-
-        const fixText = buildSafeAutofix(enclosingLoop, node, context.sourceCode);
-        const loopName = getLoopNodeName(enclosingLoop.type as AST_NODE_TYPES);
-
-        context.report({
-          node,
-          messageId: 'awaitInLoop',
-          data: { loopType: loopName },
-          fix:
-            fixText === null
-              ? undefined
-              : (fixer) => fixer.replaceText(enclosingLoop as unknown as TSESTree.Node, fixText),
-        });
-
-        reportedLoops.add(enclosingLoop);
-      },
-    };
-  },
-});
-
-export default noAwaitInLoop;
+        hasEarlyExit€ôÑÉÕ”ì(€€€€€ô((€€€€€¥˜€¡¹½‘”¹ÑåÁ”€ôôôMQ}9=}QeAL¹QÉåMÑ…Ñ•µ•¹Ð€˜˜¹½‘”¹¡…¹‘±•È¤ì(€€€€€€€±•Ð…Ñ¡!…Í½¹Ñ¥¹Õ”€ô™…±Í”ì(€€€€€€€Ý…±­9½‘” (€€€€€€€€€¹½‘”¹¡…¹‘±•È¹‰½‘ä°(€€€€€€€€€€¡…Ñ¡9½‘”¤€ôøì(€€€€€€€€€€€¥˜€¡…Ñ¡9½‘”¹ÑåÁ”€ôôôMQ}9=}QeAL¹½¹Ñ¥¹Õ•MÑ…Ñ•µ•¹Ð¤ì(€€€€€€€€€€€€€…Ñ¡!…Í½¹Ñ¥¹Õ”€ôÑÉÕ”ì(€€€€€€€€€€€ô(€€€€€€€€€ô°(€€€€€€€€€ÑÉÕ”°(€€€€€€€€¤ì((€€€€€€€¥˜€¡…Ñ¡!…Í½¹Ñ¥¹Õ”¤ì(€€€€€€€€€¡…Í…Ñ¡½¹Ñ¥¹Õ”€ôÑÉÕ”ì(€€€€€€€ô(€€€€€ô((€€€€€¥˜€¡¹½‘”¹ÑåÁ”€ôôôMQ}9=}QeAL¹…±±áÁÉ•ÍÍ¥½¸¤ì(€€€€€€€¥˜€ (€€€€€€€€€¹½‘”¹…±±•”¹ÑåÁ”€ôôôMQ}9=}QeAL¹5•µ‰•ÉáÁÉ•ÍÍ¥½¸€˜˜(€€€€€€€€€¹½‘”¹…±±•”¹ÁÉ½Á•ÉÑä¹ÑåÁ”€ôôôMQ}9=}QeAL¹%‘•¹Ñ¥™¥•È(€€€€€€€€¤ì(€€€€€€€€€½¹ÍÐµ•Ñ¡½€ô¹½‘”¹…±±•”¹ÁÉ½Á•ÉÑä¹¹…µ”¹Ñ½1½Ý•É…Í” ¤ì(€€€€€€€€€¥˜€¡5UQQ%=9}5Q!=}95L¹¡…Ì¡µ•Ñ¡½¤¤ì(€€€€€€€€€€€½¹ÍÐÉ½½Ð€ô•ÑI½½Ñ%‘•¹Ñ¥™¥•É9…µ”¡¹½‘”¹…±±•”¹½‰©•Ð¤ì(€€€€€€€€€€€¥˜€¡É½½Ð€˜˜€…±½…±	¥¹‘¥¹Ì¹¡…Ì¡É½½Ð¤¤ì(€€€€€€€€€€€€€¡…ÍM•ÅÕ•¹Ñ¥…±•Á•¹‘•¹ä€ôÑÉÕ”ì(€€€€€€€€€€€ô(€€€€€€€€€ô(€€€€€€€ô(€€€€€ô((€€€€€¥˜€¡¹½‘”¹ÑåÁ”€ôôôMQ}9=}QeAL¹1¥Ñ•É…°€˜˜ÑåÁ•½˜¹½‘”¹Ù…±Õ”€ôôô€ÍÑÉ¥¹œœ¤ì(€€€€€€€½¹ÍÐ±½Ý•È€ô¹½‘”¹Ù…±Õ”¹Ñ½1½Ý•É…Í” ¤ì(€€€€€€€¥˜€¡II=I}=}!%9QL¹Í½µ” ¡¡¥¹Ð¤€ôø±½Ý•È¹¥¹±Õ‘•Ì¡¡¥¹Ð¤¤¤ì(€€€€€€€€€¡…ÍÉÉ½É½‘•!¥¹Ð€ôÑÉÕ”ì(€€€€€€€ô(€€€€€ô(€€€ô°(€€€ÑÉÕ”°(€€¤ì((€¥˜€ …¡…ÍI•ÑÉå9…µ•!¥¹Ð€˜˜Í¥‰±¥¹MÑ…Ñ•µ•¹ÑÌ¹±•¹Ñ €ø€À¤ì(€€€™½È€¡½¹ÍÐÍ¥‰±¥¹œ½˜Í¥‰±¥¹MÑ…Ñ•µ•¹ÑÌ¤ì(€€€€€¥˜€¡¹½‘•½¹Ñ…¥¹ÍÉÉ½É½‘•!¥¹Ð¡Í¥‰±¥¹œ¤¤ì(€€€€€€€¡…ÍÉÉ½É½‘•!¥¹Ð€ôÑÉÕ”ì(€€€€€ô((€€€€€Ý…±­9½‘”(€€€€€€€Í¥‰±¥¹œ°(€€€€€€€€¡¹½‘”¤€ôøì(€€€€€€€€€¥˜€¡¹½‘”¹ÑåÁ”€ôôôMQ}9=}QeAL¹%‘•¹Ñ¥™¥•È¤ì(€€€€€€€€€€€¡•­%‘•¹Ñ¥™¥•É9…µ”¡¹½‘”¹¹…µ”¤ì(€€€€€€€€€ô(€€€€€€€ô°(€€€€€€€ÑÉÕ”°(€€€€€€¤ì(€€€ô(€ô((€½¹ÍÐ¡…ÍI•ÑÉå=É…±±‰…­%¹Ñ•¹Ð€ô(€€€¡…ÍI•ÑÉå9…µ•!¥¹Ðñð(€€€¡…Í½Õ¹Ñ•É%¹É•µ•¹Ðñð(€€€¡…Í…É±åá¥Ðñð(€€€¡…Í…Ñ¡½¹Ñ¥¹Õ”ñð(€€€¡…ÍÉÉ½É½‘•!¥¹Ðñð(€€€¡…ÍM•ÅÕ•¹Ñ¥…±•Á•¹‘•¹äñð(€€€¡…Í½¹ÑÉ½±Ý…¥Ðì((€É•ÑÕÉ¸ì(€€€¥Í%¹‘•Á•¹‘•¹Ðè€…¡…ÍI•ÑÉå=É…±±‰…­%¹Ñ•¹Ð°(€ôì)ô()™Õ¹Ñ¥½¸•Ñ1½½Á	½‘åMÑ…Ñ•µ•¹ÑÌ¡±½½Á9½‘”è1½½Á9½‘”¤èQMMQÉ•”¹MÑ…Ñ•µ•¹Ñmtì(€É•ÑÕÉ¸±½½Á9½‘”¹‰½‘ä¹ÑåÁ”€ôôôMQ}9=}QeAL¹	±½­MÑ…Ñ•µ•¹Ð(€€€€ü±½½Á9½‘”¹‰½‘ä¹‰½‘ä(€€€€èm±½½Á9½‘”¹‰½‘åtì)ô()™Õ¹Ñ¥½¸•Ñ½É=™A…É…µ9…µ”¡±½½Á9½‘”èQMMQÉ•”¹½É=™MÑ…Ñ•µ•¹Ð¤èÍÑÉ¥¹œð¹Õ±°ì(€¥˜€¡±½½Á9½‘”¹±•™Ð¹ÑåÁ”€ôôôMQ}9=}QeAL¹%‘•¹Ñ¥™¥•È¤ì(€€€É•ÑÕÉ¸±½½Á9½‘”¹±•™Ð¹¹…µ”ì(€ô((€¥˜€¡±½½Á9½‘”¹±•™Ð¹ÑåÁ”€ôôôMQ}9=}QeAL¹Y…É¥…‰±••±…É…Ñ¥½¸¤ì(€€€¥˜€¡±½½Á9½‘”¹±•™Ð¹‘•±…É…Ñ¥½¹Ì¹±•¹Ñ €„ôô€Ä¤É•ÑÕÉ¸¹Õ±°ì(€€€½¹ÍÐ¥€ô±½½Á9½‘”¹±•™Ð¹‘•±…É…Ñ¥½¹ÍlÁt¹¥ì(€€€¥˜€¡¥¹ÑåÁ”€„ôôMQ}9=}QeAL¹%‘•¹Ñ¥™¥•È¤É•ÑÕÉ¸¹Õ±°ì(€€€É•ÑÕÉ¸¥¹¹…µ”ì(€ô((€É•ÑÕÉ¸¹Õ±°ì)ô()™Õ¹Ñ¥½¸‰Õ¥±‘M…™•ÕÑ½™¥à (€±½½Á9½‘”è1½½Á9½‘”°(€…Ý…¥Ñ9½‘”èQMMQÉ•”¹Ý…¥ÑáÁÉ•ÍÍ¥½¸°(€Í½ÕÉ•½‘”èI•…‘½¹±äñQMM1¥¹Ð¹M½ÕÉ•½‘”ø°(¤èÍÑÉ¥¹œð¹Õ±°ì(€¥˜€ (€€€€…±½½Á9½‘”¹Á…É•¹Ðñð(€€€±½½Á9½‘”¹Á…É•¹Ð¹ÑåÁ”€„ôôMQ}9=}QeAL¹	±½­MÑ…Ñ•µ•¹Ðñð(€€€€…±½½Á9½‘”¹Á…É•¹Ð¹Á…É•¹Ðñð(€€€€…¥ÍÕ¹Ñ¥½¹9½‘”¡±½½Á9½‘”¹Á…É•¹Ð¹Á…É•¹Ð¤(€€¤ì(€€€É•ÑÕÉ¸¹Õ±°ì(€ô((€¥˜€¡±½½Á9½‘”¹ÑåÁ”€„ôôMQ}9=}QeAL¹½É=™MÑ…Ñ•µ•¹Ðñð±½½Á9½‘”¹…Ý…¥Ð¤ì(€€€É•ÑÕÉ¸¹Õ±°ì(€ô((€½¹ÍÐ±½½ÁMÑ…Ñ•µ•¹ÑÌ€ô•Ñ1½½Á	½‘åMÑ…Ñ•µ•¹ÑÌ¡±½½Á9½‘”¤ì(€¥˜€¡±½½ÁMÑ…Ñ•µ•¹ÑÌ¹±•¹Ñ €„ôô€Ä¤ì(€€€É•ÑÕÉ¸¹Õ±°ì(€ô((€½¹ÍÐ½¹±åMÑ…Ñ•µ•¹Ð€ô±½½ÁMÑ…Ñ•µ•¹ÑÍlÁtì(€¥˜€ (€€€½¹±åMÑ…Ñ•µ•¹Ð¹ÑåÁ”€„ôôMQ}9=}QeAL¹áÁÉ•ÍÍ¥½¹MÑ…Ñ•µ•¹Ðñð(€€€½¹±åMÑ…Ñ•µ•¹Ð¹•áÁÉ•ÍÍ¥½¸¹ÑåÁ”€„ôôMQ}9=}QeAL¹Ý…¥ÑáÁÉ•ÍÍ¥½¸ñð(€€€½¹±åMÑ…Ñ•µ•¹Ð¹•áÁÉ•ÍÍ¥½¸€„ôô…Ý…¥Ñ9½‘”ñð(€€€½¹±åMÑ…Ñ•µ•¹Ð¹•áÁÉ•ÍÍ¥½¸¹…ÉÕµ•¹Ð¹ÑåÁ”€„ôôMQ}9=}QeAL¹…±±áÁÉ•ÍÍ¥½¸(€€¤ì(€€€É•ÑÕÉ¸¹Õ±°ì(€ô((€½¹ÍÐÁ…É…µ9…µ”€ô•Ñ½É=™A…É…µ9…µ”¡±½½Á9½‘”¤ì(€¥˜€ …Á…É…µ9…µ”¤ì(€€€É•ÑÕÉ¸¹Õ±°ì(€ô((€½¹ÍÐ¥Ñ•É…‰±•Q•áÐ€ôÍ½ÕÉ•½‘”¹•ÑQ•áÐ¡±½½Á9½‘”¹É¥¡Ð¤ì(€½¹ÍÐ…Ý…¥Ñ•‘…±±Q•áÐ€ôÍ½ÕÉ•½‘”¹•ÑQ•áÐ¡½¹±åMÑ…Ñ•µ•¹Ð¹•áÁÉ•ÍÍ¥½¸¹…ÉÕµ•¹Ð¤ì((€É•ÑÕÉ¸…Ý…¥ÐAÉ½µ¥Í”¹…±° ‘í¥Ñ•É…‰±•Q•áÑô¹µ…À¡…Íå¹Œ€ ‘íÁ…É…µ9…µ•ô¤€ôø…Ý…¥Ð€‘í…Ý…¥Ñ•‘…±±Q•áÑô¤¤í€ì)ô()•áÁ½ÉÐ½¹ÍÐ¹½Ý…¥Ñ%¹1½½À€ôÉ•…Ñ•IÕ±”¡ì(€¹…µ”è€¹¼µ…Ý…¥Ðµ¥¸µ±½½Àœ°(€µ•Ñ„èì(€€€ÑåÁ”è€ÍÕ•ÍÑ¥½¸œ°(€€€‘½Ìèì(€€€€€‘•ÍÉ¥ÁÑ¥½¸è(€€€€€€€€¥Í…±±½Ü¥¹‘•Á•¹‘•¹Ð…Ý…¥Ñ€ÕÍ…”¥¹Í¥‘”±½½ÁÌ°Ý¡¥±”…±±½Ý¥¹œ¥¹Ñ•¹Ñ¥½¹…°É•ÑÉä½™…±±‰…¬½Í•ÅÕ•¹Ñ¥…°Ý½É­™±½ÝÌ¸$Ñ½½±Ì™É•ÅÕ•¹Ñ±ä•¹•É…Ñ”…¥‘•¹Ñ…°Í•ÅÕ•¹Ñ¥…°…Ý…¥ÑÌÝ¡•É”AÉ½µ¥Í”¹…±°Ý½Õ±‰”Í…™•È…¹™…ÍÑ•È¸%¹±Õ‘•Ì„Í…™”…ÕÑ½™¥à™½ÈÍ¥µÁ±”¥¹‘•Á•¹‘•¹Ð±½½ÁÌ¸œ°(€€€ô°(€€€™¥á…‰±”è€½‘”œ°(€€€Í¡•µ„èl(€€€€€ì(€€€€€€€ÑåÁ”è€½‰©•Ðœ°(€€€€€€€ÁÉ½Á•ÉÑ¥•Ìèì(€€€€€€€€€…±±½ÝA…ÑÑ•É¹Ìèì(€€€€€€€€€€€ÑåÁ”è€…ÉÉ…äœ°(€€€€€€€€€€€¥Ñ•µÌèìÑåÁ”è€ÍÑÉ¥¹œœô°(€€€€€€€€€€€‘•ÍÉ¥ÁÑ¥½¸è€¥±”±½ˆÁ…ÑÑ•É¹ÌÑ¼Í­¥À€¡”¹œ¸°€¨¨¼¨¹Ñ•ÍÐ¹ÑÌ°€¨¨½Í¥µÕ±…Ñ¥½¸¼¨¨¤œ°(€€€€€€€€€ô°(€€€€€€€ô°(€€€€€€€…‘‘¥Ñ¥½¹…±AÉ½Á•ÉÑ¥•Ìè™…±Í”°(€€€€€ô°(€€€t°(€€€µ•ÍÍ…•Ìèì(€€€€€…Ý…¥Ñ%¹1½½Àè(€€€€€€€€M•ÅÕ•¹Ñ¥…°…Ý…¥Ñ€¥¹Í¥‘”„íí±½½ÁQåÁ•õôƒŠBP¥˜Ñ¡•Í”¥Ñ•µÌ…É”¥¹‘•Á•¹‘•¹Ð°½¹Í¥‘•ÈAÉ½µ¥Í”¹…±° ¥€™½ÈÁ…É…±±•°•á•ÕÑ¥½¸¸%˜Í•ÅÕ•¹Ñ¥…°½É‘•Èµ…ÑÑ•ÉÌ°Ñ¡¥Ìµ…ä‰”¥¹Ñ•¹Ñ¥½¹…°¸œ°(€€€ô°(€ô°(€‘•™…Õ±Ñ=ÁÑ¥½¹Ìèmíõt°(€É•…Ñ”¡½¹Ñ•áÐ°m½ÁÑ¥½¹Ít¤ì(€€€¥˜€¡¡…Í¥±•MÕÁÁÉ•ÍÍ¥½¸¡½¹Ñ•áÐ¹Í½ÕÉ•½‘”¤¤ì(€€€€€É•ÑÕÉ¸íôì(€€€ô((€€€€¼¼¥±”µ±•Ù•°ÍÕÁÁÉ•ÍÍ¥½¸èÑ•ÍÐ™¥±•Ì…¹Í¥µÕ±…Ñ¥½¸½‘•µ¼™¥±•ÌÕÍ”Í•ÅÕ•¹Ñ¥…°…Ý…¥Ð¥¹Ñ•¹Ñ¥½¹…±±ä(€€€½¹ÍÐ™¥±•¹…µ”€ô½¹Ñ•áÐ¹™¥±•¹…µ”€üü½¹Ñ•áÐ¹•Ñ¥±•9…µ”ü¸ ¤€üü€œœì(€€€½¹ÍÐ™¥±•	…Í•¹…µ”€ôÁ…Ñ ¹‰…Í•¹…µ”¡™¥±•¹…µ”¤¹Ñ½1½Ý•É…Í” ¤ì(€€€½¹ÍÐ™¥±•A…Ñ €ô™¥±•¹…µ”¹Ñ½1½Ý•É…Í” ¤ì((€€€½¹ÍÐ¥ÍQ•ÍÑ¥±”€ô(€€€€€™¥±•	…Í•¹…µ”¹¥¹±Õ‘•Ì œ¹Ñ•ÍÐ¸œ¤ñð(€€€€€™¥±•	…Í•¹…µ”¹¥¹±Õ‘•Ì œ¹ÍÁ•Œ¸œ¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½}}Ñ•ÍÑÍ}|¼œ¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½Ñ•ÍÐ¼œ¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½Ñ•ÍÑÌ¼œ¤ì((€€€½¹ÍÐ¥ÍM¥µÕ±…Ñ¥½¹¥±”€ô(€€€€€M%5U1Q%=9}95}I`¹Ñ•ÍÐ¡™¥±•	…Í•¹…µ”¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½Í¥µÕ±…Ñ¥½¸¼œ¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½‘•µ¼¼œ¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½…¹¥µ…Ñ¥½¸¼œ¤ñð(€€€€€™¥±•A…Ñ ¹¥¹±Õ‘•Ì œ½™¥áÑÕÉ•Ì¼œ¤ì((€€€€¼¼MÕÁÁÉ•ÍÌ•¹Ñ¥É•±ä™½ÈÑ•ÍÐ…¹Í¥µÕ±…Ñ¥½¸™¥±•Ì(€€€¥˜€¡¥ÍQ•ÍÑ¥±”ñð¥ÍM¥µÕ±…Ñ¥½¹¥±”¤ì(€€€€€É•ÑÕÉ¸íôì(€€€ô((€€€€¼¼¡•¬ÕÍ•ÈµÁÉ½Ù¥‘•…±±½ÝA…ÑÑ•É¹Ì€¡‰…Í¥ŒÍÕ™™¥à½ÍÕ‰ÍÑÉ¥¹œµ…Ñ¡¥¹œ¤(€€€½¹ÍÐì…±±½ÝA…ÑÑ•É¹Ì€ômtô€ô½ÁÑ¥½¹Ì…Ìì…±±½ÝA…ÑÑ•É¹ÌüèÍÑÉ¥¹mtôì(€€€™½È€¡½¹ÍÐÁ…ÑÑ•É¸½˜…±±½ÝA…ÑÑ•É¹Ì¤ì(€€€€€€¼¼M¥µÁ±”Á…ÑÑ•É¸è¥˜™¥±”Á…Ñ ½¹Ñ…¥¹ÌÑ¡”¹½¸µ±½ˆÁ…ÉÐ(€€€€€½¹ÍÐ±•…¹•€ôÁ…ÑÑ•É¸¹É•Á±…” ½p©p¨½œ°€œœ¤¹É•Á±…” ½p¨½œ°€œœ¤¹É•Á±…” ½p¼½œ°Á…Ñ ¹Í•À¤ì(€€€€€¥˜€¡±•…¹•€˜˜™¥±•A…Ñ ¹¥¹±Õ‘•Ì¡±•…¹•¹Ñ½1½Ý•É…Í” ¤¤¤ì(€€€€€€€É•ÑÕÉ¸íôì(€€€€€ô(€€€ô((€€€½¹ÍÐ±½½Á%¹Ñ•¹Ñ…¡”€ô¹•Ü]•…­5…Àñ1½½Á9½‘”°%¹Ñ•¹Ñ¹…±åÍ¥Ìø ¤ì(€€€½¹ÍÐÉ•Á½ÉÑ•‘1½½ÁÌ€ô¹•Ü]•…­M•Ðñ1½½Á9½‘”ø ¤ì((€€€€¼¨¨(€€€€€¨QÉ…¬…¹•ÍÑ½ÈÍ½Á”‰½Õ¹‘…É¥•Ì€¡™Õ¹Ñ¥½¹Ì¤Í¼Ý”‘½¸Ð™±…œ…Ý…¥Ð(€€€€€¨•áÁÉ•ÍÍ¥½¹Ì¥¹Í¥‘”„¹•ÍÑ•…Íå¹Œ™Õ¹Ñ¥½¸Ñ¡…Ð¡…ÁÁ•¹ÌÑ¼‰”¥¹Í¥‘”„±½½À¸(€€€€€¨¼(€€€½¹ÍÐ™Õ¹Ñ¥½¹	½Õ¹‘…ÉäèQMMQÉ•”¹9½‘•mt€ômtì((€€€™Õ¹Ñ¥½¸•¹Ñ•ÉÕ¹Ñ¥½¸¡¹½‘”èQMMQÉ•”¹9½‘”¤ì(€€€€€™Õ¹Ñ¥½¹	½Õ¹‘…Éä¹ÁÕÍ ¡¹½‘”¤ì(€€€ô(€€€™Õ¹Ñ¥½¸•á¥ÑÕ¹Ñ¥½¸ ¤ì(€€€€€™Õ¹Ñ¥½¹	½Õ¹‘…Éä¹Á½À ¤ì(€€€ô((€€€É•ÑÕÉ¸ì(€€€€€Õ¹Ñ¥½¹•±…É…Ñ¥½¸è•¹Ñ•ÉÕ¹Ñ¥½¸°(€€€€€Õ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸è•¹Ñ•ÉÕ¹Ñ¥½¸°(€€€€€ÉÉ½ÝÕ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸è•¹Ñ•ÉÕ¹Ñ¥½¸°(€€€€€€Õ¹Ñ¥½¹•±…É…Ñ¥½¸é•á¥Ðœè•á¥ÑÕ¹Ñ¥½¸°(€€€€€€Õ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸é•á¥Ðœè•á¥ÑÕ¹Ñ¥½¸°(€€€€€€ÉÉ½ÝÕ¹Ñ¥½¹áÁÉ•ÍÍ¥½¸é•á¥Ðœè•á¥ÑÕ¹Ñ¥½¸°((€€€€€Ý…¥ÑáÁÉ•ÍÍ¥½¸¡¹½‘”¤ì(€€€€€€€€¼¼]…±¬ÕÀ…¹•ÍÑ½ÉÌ±½½­¥¹œ™½È„±½½À°‰ÕÐÍÑ½À…Ð…¹ä™Õ¹Ñ¥½¸‰½Õ¹‘…Éä(€€€€€€€½¹ÍÐ…¹•ÍÑ½ÉÌ€ô½¹Ñ•áÐ¹Í½ÕÉ•½‘”¹•Ñ¹•ÍÑ½ÉÌ¡¹½‘”¤ì(€€€€€€€½¹ÍÐÕÉÉ•¹ÑÕ¹Ñ¥½¸€ô™Õ¹Ñ¥½¹	½Õ¹‘…Éåm™Õ¹Ñ¥½¹	½Õ¹‘…Éä¹±•¹Ñ €´€Åtì((€€€€€€€±•Ð•¹±½Í¥¹1½½Àè1½½Á9½‘”ð¹Õ±°€ô¹Õ±°ì(€€€€€€€™½È€¡±•Ð¤€ô…¹•ÍÑ½ÉÌ¹±•¹Ñ €´€Äì¤€øô€Àì¤´´¤ì(€€€€€€€€€½¹ÍÐ…¹•ÍÑ½È€ô…¹•ÍÑ½ÉÍm¥tì((€€€€€€€€€€¼¼MÑ½À¥˜Ý”¡¥ÐÑ¡”ÕÉÉ•¹Ð™Õ¹Ñ¥½¸‰½Õ¹‘…Éä(€€€€€€€€€¥˜€¡…¹•ÍÑ½È€ôôôÕÉÉ•¹ÑÕ¹Ñ¥½¸¤ì(€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€ô((€€€€€€€€€¥˜€¡1==A}QeAL¹¡…Ì¡…¹•ÍÑ½È¹ÑåÁ”…ÌMQ}9=}QeAL¤¤ì(€€€€€€€€€€€•¹±½Í¥¹1½½À€ô…¹•ÍÑ½È…Ì1½½Á9½‘”ì(€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€ô(€€€€€€€ô((€€€€€€€¥˜€ …•¹±½Í¥¹1½½À¤ì(€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô((€€€€€€€¥˜€¡É•Á½ÉÑ•‘1½½ÁÌ¹¡…Ì¡•¹±½Í¥¹1½½À¤¤ì(€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô((€€€€€€€¥˜€¡¡…Í1½½ÁMÕÁÁÉ•ÍÍ¥½¸¡•¹±½Í¥¹1½½À°½¹Ñ•áÐ¹Í½ÕÉ•½‘”¤¤ì(€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô((€€€€€€€½¹ÍÐ¥¹Ñ•¹Ð€ô±½½Á%¹Ñ•¹Ñ…¡”¹•Ð¡•¹±½Í¥¹1½½À¤€üü…¹…±åé•%¹Ñ•¹Ð¡•¹±½Í¥¹1½½À¤ì(€€€€€€€±½½Á%¹Ñ•¹Ñ…¡”¹Í•Ð¡•¹±½Í¥¹1½½À°¥¹Ñ•¹Ð¤ì((€€€€€€€€¼¼%¹Ñ•¹Ðµ…Ý…É”‰•¡…Ù¥½Èè(€€€€€€€€¼¼É•ÑÉä½™…±±‰…¬½Í•ÅÕ•¹Ñ¥…°±½½ÁÌ…É”ÍÕÁÁÉ•ÍÍ•€¡¹¼É•Á½ÉÐ¤¸(€€€€€€€¥˜€ …¥¹Ñ•¹Ð¹¥Í%¹‘•Á•¹‘•¹Ð¤ì(€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô((€€€€€€€½¹ÍÐ™¥áQ•áÐ€ô‰Õ¥±‘M…™•ÕÑ½™¥à¡•¹±½Í¥¹1½½À°¹½‘”°½¹Ñ•áÐ¹Í½ÕÉ•½‘”¤ì(€€€€€€€½¹ÍÐ±½½Á9…µ”€ô•Ñ1½½Á9½‘•9…µ”¡•¹±½Í¥¹1½½À¹ÑåÁ”…ÌMQ}9=}QeAL¤ì((€€€€€€€½¹Ñ•áÐ¹É•Á½ÉÐ¡ì(€€€€€€€€€¹½‘”°(€€€€€€€€€µ•ÍÍ…•%è€…Ý…¥Ñ%¹1½½Àœ°(€€€€€€€€€‘…Ñ„èì±½½ÁQåÁ”è±½½Á9…µ”ô°(€€€€€€€€€™¥àè(€€€€€€€€€€€™¥áQ•áÐ€ôôô¹Õ±°(€€€€€€€€€€€€€€üÕ¹‘•™¥¹•(€€€€€€€€€€€€€€è€¡™¥á•È¤€ôø™¥á•È¹É•Á±…•Q•áÐ¡•¹±½Í¥¹1½½À…ÌÕ¹­¹½Ý¸…ÌQMMQÉ•”¹9½‘”°™¥áQ•áÐ¤°(€€€€€€€ô¤ì((€€€€€€€É•Á½ÉÑ•‘1½½ÁÌ¹…‘¡•¹±½Í¥¹1½½À¤ì(€€€€€ô°(€€€ôì(€ô°)ô¤ì()•áÁ½ÉÐ‘•™…Õ±Ð¹½Ý…¥Ñ%¹1½½Àì
