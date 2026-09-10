@@ -1,9 +1,9 @@
 name: Fix CI
 
+# This workflow previously applied CI fixes.
+# Fixes have been applied — this file is kept for reference.
+# To re-run, use workflow_dispatch.
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/fix-ci.yml']
   workflow_dispatch:
 
 permissions:
@@ -14,55 +14,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Apply fixes with Python
-        run: |
-          python3 -c "
-          import re
-
-          # Fix 1: sarif.ts — normalizeSarifPath Windows path detection
-          with open('cli/utils/sarif.ts', 'r') as f:
-              content = f.read()
-          old = 'if (repoRoot && path.isAbsolute(filePath)) {'
-          new = '''const isWindowsAbsolute = /^[A-Za-z]:[\\\\\\\\/]/.test(filePath);
-            if (repoRoot && (path.isAbsolute(filePath) || isWindowsAbsolute)) {'''
-          content = content.replace(old, new, 1)
-          with open('cli/utils/sarif.ts', 'w') as f:
-              f.write(content)
-          print('Fixed sarif.ts')
-
-          # Fix 2: git-diff.ts — namespace import for mockability
-          with open('cli/utils/git-diff.ts', 'r') as f:
-              content = f.read()
-          content = content.replace(
-              \"import { execFileSync } from 'child_process';\",
-              \"import * as childProcess from 'child_process';\"
-          )
-          content = content.replace(
-              'return execFileSync(',
-              'return childProcess.execFileSync('
-          )
-          with open('cli/utils/git-diff.ts', 'w') as f:
-              f.write(content)
-          print('Fixed git-diff.ts')
-          "
-
-      - name: Generate package-lock.json
-        run: npm install --package-lock-only
-
-      - name: Verify typecheck
-        run: npm install && npx tsc --noEmit
-
-      - name: Commit and push fixes
-        run: |
-          git config user.name "Vaish16-code"
-          git config user.email "vaishnavisawant3127@gmail.com"
-          git add -A
-          git commit -m "fix: normalizeSarifPath Windows path support, execFileSync mockability, restore lockfile
-
-          - sarif.ts: detect Windows-style absolute paths (C:\\\\) on Linux runners
-          - git-diff.ts: namespace import for proper vi.spyOn interception
-          - package-lock.json: restored for AI Guard Scan workflow (npm ci)"
-          git push
+      - run: echo "Fixes already applied. This workflow is kept for reference only."
