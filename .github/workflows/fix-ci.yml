@@ -17,17 +17,37 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fix normalizeSarifPath for Windows paths
+      - name: Apply fixes with Python
         run: |
-          # Replace path.isAbsolute check with Windows-aware check
-          sed -i 's/if (repoRoot \&\& path.isAbsolute(filePath)) {/const isWindowsAbsolute = \/^[A-Za-z]:[\\\\\/]\//.test(filePath);\n  if (repoRoot \&\& (path.isAbsolute(filePath) || isWindowsAbsolute)) {/' cli/utils/sarif.ts
+          python3 -c "
+          import re
 
-      - name: Fix execFileSync mockability
-        run: |
-          # Change destructured import to namespace import
-          sed -i "s/import { execFileSync } from 'child_process';/import * as childProcess from 'child_process';/" cli/utils/git-diff.ts
-          # Change execFileSync calls to use namespace
-          sed -i 's/return execFileSync(/return childProcess.execFileSync(/' cli/utils/git-diff.ts
+          # Fix 1: sarif.ts — normalizeSarifPath Windows path detection
+          with open('cli/utils/sarif.ts', 'r') as f:
+              content = f.read()
+          old = 'if (repoRoot && path.isAbsolute(filePath)) {'
+          new = '''const isWindowsAbsolute = /^[A-Za-z]:[\\\\\\\\/]/.test(filePath);
+            if (repoRoot && (path.isAbsolute(filePath) || isWindowsAbsolute)) {'''
+          content = content.replace(old, new, 1)
+          with open('cli/utils/sarif.ts', 'w') as f:
+              f.write(content)
+          print('Fixed sarif.ts')
+
+          # Fix 2: git-diff.ts — namespace import for mockability
+          with open('cli/utils/git-diff.ts', 'r') as f:
+              content = f.read()
+          content = content.replace(
+              \"import { execFileSync } from 'child_process';\",
+              \"import * as childProcess from 'child_process';\"
+          )
+          content = content.replace(
+              'return execFileSync(',
+              'return childProcess.execFileSync('
+          )
+          with open('cli/utils/git-diff.ts', 'w') as f:
+              f.write(content)
+          print('Fixed git-diff.ts')
+          "
 
       - name: Generate package-lock.json
         run: npm install --package-lock-only
@@ -40,9 +60,9 @@ jobs:
           git config user.name "Vaish16-code"
           git config user.email "vaishnavisawant3127@gmail.com"
           git add -A
-          git commit -m "fix: normalizeSarifPath Windows path support, execFileSync mockability, restore package-lock.json
+          git commit -m "fix: normalizeSarifPath Windows path support, execFileSync mockability, restore lockfile
 
-          - sarif.ts: normalizeSarifPath now detects Windows-style absolute paths (C:\\) on Linux runners
-          - git-diff.ts: changed to namespace import (import * as childProcess) for proper vi.spyOn interception
-          - package-lock.json: restored after accidental deletion, needed by AI Guard Scan workflow (npm ci)"
+          - sarif.ts: detect Windows-style absolute paths (C:\\\\) on Linux runners
+          - git-diff.ts: namespace import for proper vi.spyOn interception
+          - package-lock.json: restored for AI Guard Scan workflow (npm ci)"
           git push
