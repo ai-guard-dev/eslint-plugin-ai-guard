@@ -352,7 +352,8 @@ export function normalizeSarifPath(filePath: string, repoRoot?: string): string 
   normalized = normalized.replace(/^[A-Za-z]:\//, '/');
 
   // 3. If an absolute path and repoRoot provided, make it relative
-  if (repoRoot && path.isAbsolute(filePath)) {
+  const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(filePath);
+  if (repoRoot && (path.isAbsolute(filePath) || isWindowsAbsolute)) {
     const posixRoot = repoRoot.replace(/\\/g, '/').replace(/^[A-Za-z]:\//, '/').replace(/\/$/, '');
     if (normalized.startsWith(posixRoot + '/')) {
       normalized = normalized.slice(posixRoot.length + 1);

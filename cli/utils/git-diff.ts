@@ -22,7 +22,7 @@
  * Both are fixed in Phase 2B.
  */
 
-import { execFileSync } from 'child_process';
+import * as childProcess from 'child_process';
 import path from 'path';
 import fs from 'fs';
 
@@ -109,7 +109,7 @@ const IGNORE_PREFIXES = [
 
 function runGit(args: readonly string[], cwd: string): string | null {
   try {
-    return execFileSync('git', args, {
+    return childProcess.execFileSync('git', args, {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
