@@ -1,0 +1,48 @@
+name: Fix CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fix normalizeSarifPath for Windows paths
+        run: |
+          # Replace path.isAbsolute check with Windows-aware check
+          sed -i 's/if (repoRoot \&\& path.isAbsolute(filePath)) {/const isWindowsAbsolute = \/^[A-Za-z]:[\\\\\/]\//.test(filePath);\n  if (repoRoot \&\& (path.isAbsolute(filePath) || isWindowsAbsolute)) {/' cli/utils/sarif.ts
+
+      - name: Fix execFileSync mockability
+        run: |
+          # Change destructured import to namespace import
+          sed -i "s/import { execFileSync } from 'child_process';/import * as childProcess from 'child_process';/" cli/utils/git-diff.ts
+          # Change execFileSync calls to use namespace
+          sed -i 's/return execFileSync(/return childProcess.execFileSync(/' cli/utils/git-diff.ts
+
+      - name: Generate package-lock.json
+        run: npm install --package-lock-only
+
+      - name: Verify typecheck
+        run: npm install && npx tsc --noEmit
+
+      - name: Commit and push fixes
+        run: |
+          git config user.name "Vaish16-code"
+          git config user.email "vaishnavisawant3127@gmail.com"
+          git add -A
+          git commit -m "fix: normalizeSarifPath Windows path support, execFileSync mockability, restore package-lock.json
+
+          - sarif.ts: normalizeSarifPath now detects Windows-style absolute paths (C:\\) on Linux runners
+          - git-diff.ts: changed to namespace import (import * as childProcess) for proper vi.spyOn interception
+          - package-lock.json: restored after accidental deletion, needed by AI Guard Scan workflow (npm ci)"
+          git push
