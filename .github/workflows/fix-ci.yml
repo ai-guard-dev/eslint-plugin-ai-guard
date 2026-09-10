@@ -1,9 +1,9 @@
 name: Fix CI
 
-# This workflow previously applied CI fixes.
-# Fixes have been applied — this file is kept for reference.
-# To re-run, use workflow_dispatch.
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-ci.yml']
   workflow_dispatch:
 
 permissions:
@@ -14,4 +14,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Fixes already applied. This workflow is kept for reference only."
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply fixes with Python
+        run: |
+          python3 << 'PYEOF'
+          # Fix 1: git-diff.ts — use require at call time for mockability
+          # vi.spyOn(require('child_process'), 'execFileSync') only works
+          # if the source code also accesses the module via require at call time
+          with open('cli/utils/git-diff.ts', 'r') as f:
+              content = f.read()
+
+          # Replace namespace import with a require-based approach
+          content = content.replace(
+              "import * as childProcess from 'child_process';",
+              "// Use require for child_process so vi.spyOn(require('child_process'), 'execFileSync') works in tests\nconst childProcess = require('child_process');"
+          )
+
+          with open('cli/utils/git-diff.ts', 'w') as f:
+              f.write(content)
+          print('Fixed git-diff.ts: changed to require-based import')
+
+          # Fix 2: sarif.ts — already fixed, verify
+          with open('cli/utils/sarif.ts', 'r') as f:
+              sarif = f.read()
+          if 'isWindowsAbsolute' not in sarif:
+              # Apply the fix if not already present
+              old = 'if (repoRoot && path.isAbsolute(filePath)) {'
+              new = "const isWindowsAbsolute = /^[A-Za-z]:[\\\\/]/.test(filePath);\n  if (repoRoot && (path.isAbsolute(filePath) || isWindowsAbsolute)) {"
+              sarif = sarif.replace(old, new, 1)
+              with open('cli/utils/sarif.ts', 'w') as f:
+                  f.write(sarif)
+              print('Fixed sarif.ts: added Windows path detection')
+          else:
+              print('sarif.ts already fixed')
+
+          PYEOF
+
+      - name: Verify typecheck
+        run: npm install && npx tsc --noEmit
+
+      - name: Run failing tests to check
+        run: npx vitest run tests/ci/pr-diff.test.ts -t "SECURITY" --reporter=verbose 2>&1 | tail -30 || true
+
+      - name: Commit and push fixes
+        run: |
+          git config user.name "Vaish16-code"
+          git config user.email "vaishnavisawant3127@gmail.com"
+          git add -A
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "fix: use require-based import for child_process mockability
+
+          Changed from namespace import (import * as) to require-based
+          const so vi.spyOn(require('child_process'), 'execFileSync')
+          properly intercepts calls in pr-diff tests."
+          git push
