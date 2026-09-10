@@ -22,7 +22,8 @@
  * Both are fixed in Phase 2B.
  */
 
-import * as childProcess from 'child_process';
+// Use require for child_process so vi.spyOn(require('child_process'), 'execFileSync') works in tests
+const childProcess = require('child_process');
 import path from 'path';
 import fs from 'fs';
 
