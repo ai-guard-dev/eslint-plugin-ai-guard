@@ -13,7 +13,9 @@
  * - Trustworthy — only surface real ai-guard findings, never ecosystem noise
  */
 
-const { execSync, spawnSync } = require('child_process');
+// Use require('child_process') at call time (not destructured at module load)
+// so that vi.spyOn(require('child_process'), 'spawnSync') works in tests.
+const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -68,7 +70,7 @@ function installDependencies(cwd, pm) {
   };
   const cmd = cmds[pm] ?? cmds.npm;
   try {
-    execSync(cmd, { cwd, stdio: 'inherit', shell: true });
+    childProcess.execSync(cmd, { cwd, stdio: 'inherit', shell: true });
     return true;
   } catch {
     warn('Dependency installation failed. Attempting to continue without it.');
@@ -134,7 +136,7 @@ async function main() {
   // ── Run ai-guard ──────────────────────────────────────────────────────────
   startGroup('AI Guard — Scan results');
 
-  const result = spawnSync(
+  const result = childProcess.spawnSync(
     'npx',
     ['--yes', 'ai-guard', ...cliArgs],
     {
@@ -201,13 +203,15 @@ async function main() {
   // When using spawnSync, we propagate that code.
   // A null status means the child was killed by a signal (e.g. OOM/SIGKILL) —
   // that must be treated as a failure, not a success.
-  if (result.status !== 0) {
+  const exitStatus = result.status;
+  if (exitStatus !== 0) {
     if (failOn === 'none') {
       // Report-only mode — never fail the workflow
       info('fail-on: none — findings reported but not failing build.');
       process.exit(0);
     }
-    process.exit(result.status);
+    // null status = signal kill (SIGKILL, OOM, etc.) — treat as failure code 1
+    process.exit(exitStatus === null ? 1 : exitStatus);
   }
 
   process.exit(0);
