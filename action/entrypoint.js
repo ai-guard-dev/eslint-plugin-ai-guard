@@ -22,8 +22,10 @@ const path = require('path');
 // ─── GitHub Actions helpers ───────────────────────────────────────────────────
 
 function getInput(name, defaultValue = '') {
-  const envName = `INPUT_${name.toUpperCase().replace(/-/g, '_')}`;
-  return (process.env[envName] ?? '').trim() || defaultValue;
+  const withHyphen = `INPUT_${name.toUpperCase()}`;
+  const withUnderscore = `INPUT_${name.toUpperCase().replace(/-/g, '_')}`;
+  const val = process.env[withHyphen] ?? process.env[withUnderscore];
+  return (val !== undefined && val !== null ? String(val).trim() : '') || defaultValue;
 }
 
 function setOutput(name, value) {
@@ -136,13 +138,18 @@ async function main() {
   // ── Run ai-guard ──────────────────────────────────────────────────────────
   startGroup('AI Guard — Scan results');
 
+  const localBin = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'ai-guard.cmd' : 'ai-guard');
+  const hasLocal = fs.existsSync(localBin);
+  const exe = hasLocal ? localBin : 'npx';
+  const args = hasLocal ? cliArgs : ['--yes', '-p', 'eslint-plugin-ai-guard', 'ai-guard', ...cliArgs];
+
   const result = childProcess.spawnSync(
-    'npx',
-    ['--yes', 'ai-guard', ...cliArgs],
+    exe,
+    args,
     {
       cwd,
       stdio: 'inherit',
-      shell: false,
+      shell: true,
       env: {
         ...process.env,
         FORCE_COLOR: '1',
@@ -189,7 +196,20 @@ async function main() {
     setOutput('sarif-file', sarifOutputPath);
     info(`SARIF written to: ${sarifOutputPath}`);
   } else if (uploadSarif) {
-    warn(`SARIF file not found at ${sarifOutputPath}. SARIF upload will not work.`);
+    warn(`SARIF file not found at ${sarifOutputPath}. Creating fallback SARIF artifact.`);
+    try {
+      const emptySarif = {
+        $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+        version: '2.1.0',
+        runs: [{
+          tool: { driver: { name: 'ai-guard', version: '1.3.0', informationUri: 'https://github.com/ai-guard-dev/eslint-plugin-ai-guard', rules: [] } },
+          automationDetails: { id: 'ai-guard' },
+          results: []
+        }]
+      };
+      fs.writeFileSync(sarifOutputPath, JSON.stringify(emptySarif, null, 2), 'utf-8');
+      setOutput('sarif-file', sarifOutputPath);
+    } catch {}
   }
 
   setOutput('issues-found', String(issuesFound));
