@@ -15,6 +15,7 @@
   <a href="https://www.npmjs.com/package/eslint-plugin-ai-guard"><strong>npm Package</strong></a> &nbsp;•&nbsp;
   <a href="https://github.com/ai-guard-dev/eslint-plugin-ai-guard"><strong>GitHub Repository</strong></a> &nbsp;•&nbsp;
   <a href="./docs/rules/"><strong>Rules Catalog</strong></a> &nbsp;•&nbsp;
+  <a href="./docs/benchmarks.md"><strong>Benchmarks</strong></a> &nbsp;•&nbsp;
   <a href="./docs/getting-started.md"><strong>Documentation</strong></a>
 </p>
 
@@ -507,6 +508,73 @@ npx eslint . --fix
 | `no-empty-catch` | Inserts `/* TODO: handle error */` comment to prevent silent swallowing |
 | `no-floating-promise` | Prepends `void ` expression to intentionally unawaited calls |
 | `no-await-in-loop` | Rewrites straightforward sequential loops to `await Promise.all(...)` |
+
+---
+
+## Benchmarks & Empirical Evaluation
+
+AI Guard has been empirically evaluated across multiple benchmarks comparing runtime scan performance, coverage gaps vs. standard tooling, and detection accuracy across real-world codebases.
+
+### 1. What AI Guard Catches vs. Conventional Linters
+
+Conventional linters either omit AI-specific hazards entirely or require heavyweight TypeScript type-checking (`parserOptions.project`) that significantly slows down CI:
+
+| Pattern | AI Guard Rule | ESLint Core | `@typescript-eslint` |
+| :--- | :--- | :---: | :--- |
+| **Floating Promises** (unawaited async call) | [`no-floating-promise`](./docs/rules/no-floating-promise.md) | ❌ None | `@typescript-eslint/no-floating-promises` *(requires type info)* |
+| **Async Array Callbacks** (`.map(async ...)`) | [`no-async-array-callback`](./docs/rules/no-async-array-callback.md) | ❌ None | Partial: `no-misused-promises` *(requires type info)* |
+| **Empty Catch Blocks** (swallowed errors) | [`no-empty-catch`](./docs/rules/no-empty-catch.md) | `no-empty` *(weaker)* | ❌ None |
+| **Hardcoded Secrets / API Tokens** | [`no-hardcoded-secret`](./docs/rules/no-hardcoded-secret.md) | ❌ None | ❌ None |
+| **Raw SQL String Concatenation** | [`no-sql-string-concat`](./docs/rules/no-sql-string-concat.md) | ❌ None | ❌ None |
+| **Missing Route Auth Middleware** | [`require-auth-middleware`](./docs/rules/require-auth-middleware.md) | ❌ None | ❌ None |
+| **Missing Route Authorization Checks** | [`require-authz-check`](./docs/rules/require-authz-check.md) | ❌ None | ❌ None |
+| **Dynamic `eval()` / `new Function()`** | [`no-eval-dynamic`](./docs/rules/no-eval-dynamic.md) | `no-eval` *(blanket ban)* | ❌ None |
+| **Unsafe `JSON.parse(req.body)`** | [`no-unsafe-deserialize`](./docs/rules/no-unsafe-deserialize.md) | ❌ None | ❌ None |
+| **Async Without Await** | [`no-async-without-await`](./docs/rules/no-async-without-await.md) | ❌ None | `require-await` |
+| **Sequential Await in Loop** | [`no-await-in-loop`](./docs/rules/no-await-in-loop.md) | `no-await-in-loop` *(no fix)* | ❌ None |
+| **Dead Code Branches (`if (true)`)** | [`no-dead-branch`](./docs/rules/no-dead-branch.md) | ❌ None | ❌ None |
+
+> [!TIP]
+> **Zero Type-Information Penalty:** 17 of 18 AI Guard rules run in pure syntax-only mode without `projectService` or `tsconfig.json`, providing sub-second execution in editors and CI pipelines.
+
+---
+
+### 2. Runtime Performance
+
+Benchmark: scanning 196 TypeScript / JavaScript files (`algorithm-automata-simulator`, Windows 11, Node.js 20, median of 3 runs):
+
+| Tool / Mode | Scan Time | Configuration Overhead |
+| :--- | :---: | :--- |
+| **`ai-guard run --strict`** | **~1.8s** | **Zero config** (18 AST heuristic rules, no `tsconfig.json` needed) |
+| `eslint .` (recommended) | ~2.5s | Core syntax rules only (misses floating promises & secrets) |
+| `eslint .` (type-aware `@typescript-eslint`) | **~8–12s** | Requires full TS compiler graph binding (**4x–6x slower**) |
+
+AI Guard executes **4x–6x faster** than type-aware linting suites because it leverages deterministic AST heuristics rather than reconstructing the full TypeScript symbol graph.
+
+---
+
+### 3. Empirical Bug Detection & Precision Study
+
+Two comprehensive empirical benchmark evaluations were conducted to measure real-world precision and detection yields:
+
+#### A. Accuracy & False Positive Audit (4 Real-World Repositories, 378 Files)
+
+| Category | Findings | True Positives | False Positive Rate |
+| :--- | :---: | :---: | :---: |
+| **Security** (`no-hardcoded-secret`, `no-eval-dynamic`, etc.) | 15 | 15 | **0%** |
+| **Reliability** (`no-empty-catch`, broad exceptions) | 53 | 53 | **0%** |
+| **Async Stability** (`no-floating-promise`, async callbacks) | 43 | ~40 | **~7%** |
+| **AI Patterns** (duplicate logic, dead branches) | 58 | 43 | **26%** *(reduced in v1.2.8+)* |
+
+#### B. Dual-Mode Detection Study (48 Call Sites & Real Production Target)
+
+Audited across a controlled multi-file test corpus (13 files, 48 call sites) and a real-world Express + MongoDB production application (`Truvita New`):
+
+- **High Precision:** **100% precision** on type-aware exclusive findings (26 of 26 verified True Positives; 0 false alarms on synchronous controls).
+- **Critical Detection:** Detected **1 critical database startup race condition** in production (`server/index.ts connectDB()`) where an unawaited connection call allowed requests to hit the database before initialization.
+- **Single-File Actionability:** **100%** of findings were resolvable locally at the call site (`await`, `.catch()`, or `void`).
+
+For the complete methodology, raw findings, and benchmark harness, see [**`docs/benchmarks.md`**](./docs/benchmarks.md).
 
 ---
 
