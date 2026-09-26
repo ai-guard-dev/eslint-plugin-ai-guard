@@ -16,6 +16,7 @@
   <a href="https://github.com/ai-guard-dev/eslint-plugin-ai-guard"><strong>GitHub Repository</strong></a> &nbsp;•&nbsp;
   <a href="./docs/rules/"><strong>Rules Catalog</strong></a> &nbsp;•&nbsp;
   <a href="./docs/benchmarks.md"><strong>Benchmarks</strong></a> &nbsp;•&nbsp;
+  <a href="./docs/integrations/claude-code.md"><strong>Claude Code</strong></a> &nbsp;•&nbsp;
   <a href="./docs/getting-started.md"><strong>Documentation</strong></a>
 </p>
 
@@ -316,6 +317,31 @@ AI Guard CLI & GitHub Action deterministically verifies the output in CI
 ```
 
 This dual-layer defense minimizes review friction and ensures generated code meets your security standard on the first pass.
+
+---
+
+## Claude Code Integration
+
+AI Guard integrates directly with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as a **PostToolUse validation hook**. Every time Claude Code edits or writes a JS/TS file, AI Guard automatically scans it for common issues.
+
+```bash
+# One-command setup
+npx ai-guard init-claude
+```
+
+This configures a PostToolUse hook in `.claude/settings.json` that runs AI Guard's fast `agent` preset (5 high-confidence rules, ~50-200ms per file) after every file edit. Claude Code reads the diagnostics and can fix issues automatically.
+
+```bash
+# Preview before applying
+npx ai-guard init-claude --dry-run
+
+# Use per-machine settings (gitignored)
+npx ai-guard init-claude --local
+```
+
+**Agent preset rules:** `no-hardcoded-secret`, `no-eval-dynamic`, `no-empty-catch`, `no-sql-string-concat`, `no-floating-promise`
+
+→ [Full documentation](./docs/integrations/claude-code.md)
 
 ---
 

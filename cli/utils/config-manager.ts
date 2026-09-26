@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { ConfigType } from './detector.js';
 
-export type Preset = 'recommended' | 'strict' | 'security';
+export type Preset = 'recommended' | 'strict' | 'security' | 'agent';
 
 // ─── File I/O primitives ──────────────────────────────────────────────────────
 
