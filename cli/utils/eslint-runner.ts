@@ -3,6 +3,8 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import chalk from 'chalk';
 import { log } from './logger.js';
+import { AGENT_RULES } from '../../src/configs/agent.js';
+export { AGENT_RULES };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -297,13 +299,7 @@ const SECURITY_RULES: Record<string, RuleLevel> = {
  * Benchmark evidence: These rules ran at 100% precision across 378 files (4 repos)
  * with 0% FP rate on security rules and <7% on async stability.
  */
-const AGENT_RULES: Record<string, RuleLevel> = {
-  'ai-guard/no-hardcoded-secret': 'error',    // High confidence, 0% FP
-  'ai-guard/no-eval-dynamic': 'error',        // High confidence, 0% FP
-  'ai-guard/no-empty-catch': 'error',         // High confidence, critical for AI-generated code
-  'ai-guard/no-sql-string-concat': 'error',   // Medium confidence, but SQL injection is severe
-  'ai-guard/no-floating-promise': 'error',    // High confidence in syntax-only mode
-};
+// AGENT_RULES is defined in and imported from src/configs/agent.ts as the single source of truth.
 
 function getRules(preset: Preset): Record<string, RuleLevel> {
   if (preset === 'strict') return STRICT_RULES;

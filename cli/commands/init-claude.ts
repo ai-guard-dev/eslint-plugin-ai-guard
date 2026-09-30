@@ -157,7 +157,7 @@ export function registerInitClaudeCommand(program: Command): void {
     .description('Configure Claude Code PostToolUse hook for AI Guard validation')
     .option('--dry-run', 'Preview what would change without writing any files')
     .option('--local', 'Write to .claude/settings.local.json instead of settings.json')
-    .action(async (opts: { dryRun?: boolean; local?: boolean }) => {
+    .action((opts: { dryRun?: boolean; local?: boolean }) => {
       const cwd = process.cwd();
       const isDryRun = opts.dryRun === true;
       const useLocal = opts.local === true;

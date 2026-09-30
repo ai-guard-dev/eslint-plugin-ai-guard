@@ -156,13 +156,14 @@ AI Guard includes **18 deterministic rules** divided into four specialized categ
 
 ## Presets
 
-AI Guard exports three official configurations ready for flat config or legacy setups:
+AI Guard exports four official configurations ready for flat config or legacy setups:
 
 | Preset | Description | Configuration Focus |
 | :--- | :--- | :--- |
 | **`recommended`** | **Default.** Balanced adoption preset. Enables 4 high-confidence critical rules at `error`, 9 context-sensitive rules at `warn`, and disables 5 noisy rules. Zero noise on day one. | Production codebases, new teams |
 | **`strict`** | Enforces **all 18 rules at `error`**. Designed for zero-tolerance CI gates, high-assurance software, and mature teams. | Strict CI/CD quality gates |
 | **`security`** | Focuses exclusively on the **6 security rules** (`no-hardcoded-secret`, `no-eval-dynamic`, `no-sql-string-concat` at `error`; remainder at `warn`). | AppSec auditing & security scans |
+| **`agent`** | **5 high-signal rules at `error`**. Optimized for AI-agent editing workflows where lint feedback runs immediately after each file edit (e.g., PostToolUse hooks). | Claude Code, Cursor, real-time agent loops |
 
 ---
 
@@ -561,7 +562,7 @@ Conventional linters either omit AI-specific hazards entirely or require heavywe
 | **Dead Code Branches (`if (true)`)** | [`no-dead-branch`](./docs/rules/no-dead-branch.md) | ❌ None | ❌ None |
 
 > [!TIP]
-> **Zero Type-Information Penalty:** 17 of 18 AI Guard rules run in pure syntax-only mode without `projectService` or `tsconfig.json`, providing sub-second execution in editors and CI pipelines.
+> **Minimal Type-Information Dependency:** 17 of 18 AI Guard rules operate in pure syntax/scope-analysis mode without `projectService` or `tsconfig.json`. The `no-floating-promise` rule optionally uses TypeScript parser services for higher recall on cross-module Promise calls, with syntax/scope-based heuristics as a zero-config fallback.
 
 ---
 

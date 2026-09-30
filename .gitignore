@@ -29,4 +29,10 @@ test-sample.tsx
 .vscode/
 tmp-test-project/
 docs/archive/ai-guard-report.html
-*.tgz
+
+# Local interview, scratch, and analysis documents
+SAP-INTERVIEW-PREP.md
+PROJECT-DEEP-DIVE.md
+scratch/
+ai-guard-results.sarif
+how --stat*

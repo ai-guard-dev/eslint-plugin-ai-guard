@@ -99,10 +99,10 @@ export function registerPresetCommand(program: Command): void {
           { rule: 'no-broad-exception', level: chalk.yellow('warn') },
           { rule: 'no-async-array-callback', level: chalk.yellow('warn') },
           { rule: 'no-await-in-loop', level: chalk.yellow('warn') },
-          { rule: '+ 5 more…', level: chalk.gray('warn') },
+          { rule: '+ 6 more…', level: chalk.gray('warn') },
         ],
         strict: [
-          { rule: 'All 17 rules', level: chalk.red('error') },
+          { rule: 'All 18 rules', level: chalk.red('error') },
         ],
         security: [
           { rule: 'no-hardcoded-secret', level: chalk.red('error') },
@@ -111,6 +111,13 @@ export function registerPresetCommand(program: Command): void {
           { rule: 'no-unsafe-deserialize', level: chalk.yellow('warn') },
           { rule: 'require-auth-middleware', level: chalk.yellow('warn') },
           { rule: 'require-authz-check', level: chalk.yellow('warn') },
+        ],
+        agent: [
+          { rule: 'no-hardcoded-secret', level: chalk.red('error') },
+          { rule: 'no-eval-dynamic', level: chalk.red('error') },
+          { rule: 'no-empty-catch', level: chalk.red('error') },
+          { rule: 'no-sql-string-concat', level: chalk.red('error') },
+          { rule: 'no-floating-promise', level: chalk.red('error') },
         ],
       };
 

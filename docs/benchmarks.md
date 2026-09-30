@@ -27,15 +27,17 @@
 
 ### Key Differentiators
 
-1. **No type information required.** ai-guard works with plain JavaScript and TypeScript
-   without needing `parserOptions.project`. This is a major DX advantage — type-aware
-   rules in `@typescript-eslint` require a `tsconfig.json` reference, which slows down
-   linting significantly and adds configuration complexity.
+1. **Minimal type-information dependency.** 17 of 18 ai-guard rules work with plain
+   JavaScript and TypeScript without needing `parserOptions.project` or `tsconfig.json`.
+   `no-floating-promise` optionally uses TypeScript parser services for higher recall on
+   cross-module Promise calls, with syntax/scope-based heuristics as a zero-config fallback.
+   This is a major DX advantage — type-aware rules in `@typescript-eslint` require full
+   project configuration, which slows down linting significantly.
 
 2. **AI-specific heuristics.** ai-guard rules are tuned for patterns that AI coding tools
-   specifically generate. For example, `no-floating-promise` uses call-site naming heuristics
-   (functions named `send*`, `save*`, `update*`, `delete*` are more likely to be async)
-   rather than requiring full type information.
+   specifically generate. For example, `no-floating-promise` uses local async function
+   declaration resolution and known Promise factory matching (`fetch`, `Promise.all`, etc.)
+   rather than requiring full type information for the common case.
 
 3. **Autofix support.** Several ai-guard rules provide automatic fixes:
    - `no-hardcoded-secret` → `process.env.*`
@@ -68,7 +70,7 @@ Benchmark: scanning 196 TypeScript/JavaScript files (algorithm-automata-simulato
 
 | Tool | Time | Notes |
 |---|---|---|
-| `ai-guard run --strict` | ~1.8s | 18 rules, no type info needed |
+| `ai-guard run --strict` | ~1.8s | 18 rules, syntax/scope-based (no tsconfig needed) |
 | `eslint .` (recommended) | ~2.5s | Depends on config complexity |
 | `eslint .` (with @typescript-eslint type-aware) | ~8–12s | Requires tsconfig.json, full type checking |
 

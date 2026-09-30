@@ -2,12 +2,13 @@ import { allRules } from './rules';
 import recommended from './configs/recommended';
 import strict from './configs/strict';
 import security from './configs/security';
+import agent from './configs/agent';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
 // Safely read version in both CJS and ESM environments
-let pkgVersion = '1.3.0'; // Fallback (keep in sync with package.json)
+let pkgVersion = '1.3.1'; // Fallback (keep in sync with package.json)
 try {
   // Use createRequire combined with import.meta.url for ESM compatibility
   const require_ = typeof require !== 'undefined' ? require : createRequire(import.meta.url);
@@ -35,9 +36,11 @@ const plugin = {
     recommended,
     strict,
     security,
+    agent,
   },
 };
 
 export default plugin;
 export { allRules as rules };
-export { recommended, strict, security };
+export { recommended, strict, security, agent };
+

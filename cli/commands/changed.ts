@@ -46,6 +46,7 @@ export function registerChangedCommand(program: Command): void {
     .option('--staged', 'Scan only staged (git add\'d) files')
     .option('--base <branch>', 'Base branch to diff against (raw name: main, develop — not origin/main)')
     .option('--path <dir>', 'Root path / working directory for scanning', '.')
+    .option('--preset <name>', 'Rule preset: recommended (default) | strict | security | agent')
     .option('--strict', 'Use the strict rule preset (all rules at error)')
     .option('--security', 'Use the security-only rule preset')
     .option('--fail-on <level>', 'Fail CI on: high | medium | any | errors | none', 'high')
@@ -69,6 +70,7 @@ export function registerChangedCommand(program: Command): void {
       staged?: boolean;
       base?: string;
       path: string;
+      preset?: string;
       strict?: boolean;
       security?: boolean;
       failOn: string;
@@ -87,7 +89,22 @@ export function registerChangedCommand(program: Command): void {
       debugSarifPaths?: boolean;
       debugSarifPersistence?: boolean;
     }) => {
-      const preset: Preset = opts.strict ? 'strict' : opts.security ? 'security' : 'recommended';
+      let preset: Preset = 'recommended';
+      if (opts.preset) {
+        if (opts.preset === 'recommended' || opts.preset === 'strict' || opts.preset === 'security' || opts.preset === 'agent') {
+          preset = opts.preset;
+        } else {
+          log.blank();
+          log.error(`Unknown preset '${opts.preset}'. Valid presets: recommended, strict, security, agent`);
+          log.blank();
+          process.exit(1);
+          return;
+        }
+      } else if (opts.strict) {
+        preset = 'strict';
+      } else if (opts.security) {
+        preset = 'security';
+      }
       const inCI = isGitHubActions();
       // FIX: Pass raw branch name — getChangedFiles owns all ref normalization.
       // Previously, changed.ts prepended origin/ here AND git-diff.ts did it again

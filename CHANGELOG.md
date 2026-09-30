@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] — 2026-09-30
+
+### 📝 Documentation & Count Fixes
+
+- Fixed all stale references from "17 rules" to "18 rules" across CLI messages, docs, and generated context files.
+- Added missing `no-dead-branch` to the `RULE_CATEGORIES` in `init-context.ts` (root cause of the 17-rule undercount).
+- Fixed `preset.ts` display: "5 more" → "6 more" for recommended preset breakdown.
+
+### 🎯 Agent Preset — First-Class Public Export
+
+- Promoted the internal `agent` preset to a public ESLint config export (`aiGuard.configs.agent`).
+- Agent preset includes 5 high-signal rules at `error`: `no-hardcoded-secret`, `no-eval-dynamic`, `no-empty-catch`, `no-sql-string-concat`, `no-floating-promise`.
+- Optimized for AI-agent editing workflows (PostToolUse hooks, real-time feedback loops).
+- Added preset details to CLI `preset` command display.
+
+### 📖 Type-Aware Accuracy
+
+- Corrected documentation to accurately describe `no-floating-promise` as optionally type-aware (uses TypeScript parser services when available, with syntax/scope-based fallback).
+- Replaced inaccurate "No type information required" claims with precise descriptions distinguishing syntax/scope-based analysis from optional type-aware analysis.
+- Added explicit dual-mode test suite for `no-floating-promise` covering both syntax-only and type-aware execution paths.
+
+### 🧪 Testing
+
+- New `no-floating-promise-modes.test.ts`: explicit valid/invalid tests for both syntax-only and type-aware modes.
+- New `agent-preset.test.ts`: verifies agent preset rule count, rule names, severity, and scan results against a fixture file.
+- New `tests/fixtures/agent-patterns.js`: realistic AI-generated Express.js fixture with 5 intentional anti-patterns.
+- Added plugin-meta test verifying agent config export with 5 rules.
+
+---
+
 ## [1.3.0] — 2026-05-23
 
 ### 🚀 Performance Hardening

@@ -29,7 +29,7 @@ const JS_TS_EXTENSIONS = new Set([
 /**
  * Read all of stdin as a string.
  */
-async function readStdin(): Promise<string> {
+function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     process.stdin.setEncoding('utf-8');

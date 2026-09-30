@@ -245,7 +245,7 @@ describe('H9: Action outputs reflect actual scan results', () => {
       $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
       version: '2.1.0',
       runs: [{
-        tool: { driver: { name: 'ai-guard', version: '1.3.0' } },
+        tool: { driver: { name: 'ai-guard', version: '1.3.1' } },
         automationDetails: { id: 'ai-guard' },
         results: [
           { ruleId: 'ai-guard/no-hardcoded-secret', level: 'error', properties: { precision: 'high' } },
@@ -327,7 +327,7 @@ describe('H9: Action outputs reflect actual scan results', () => {
       $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
       version: '2.1.0',
       runs: [{
-        tool: { driver: { name: 'ai-guard', version: '1.3.0' } },
+        tool: { driver: { name: 'ai-guard', version: '1.3.1' } },
         results: [],
         properties: { filesScanned: 5, durationMs: 100 },
       }],

@@ -15,7 +15,7 @@ ai-guard run [options]
 | Option | Default | Description |
 |---|---|---|
 | `--path <target>` | `.` (current directory) | Directory or file to scan |
-| `--strict` | off | Use the strict preset — all 17 rules at `error` |
+| `--strict` | off | Use the strict preset — all 18 rules at `error` |
 | `--security` | off | Use the security-only preset |
 | `--json` | off | Output results as machine-readable JSON |
 | `--max-warnings <n>` | none | Exit with code 1 if warnings exceed `n` |
@@ -140,5 +140,5 @@ When using `--json`, output is written to stdout:
 | Flag | Rules enabled | Severity |
 |---|---|---|
 | (none) | recommended (12 rules) | balanced |
-| `--strict` | all 17 rules | all `error` |
+| `--strict` | all 18 rules | all `error` |
 | `--security` | 6 security rules | `error`/`warn` |

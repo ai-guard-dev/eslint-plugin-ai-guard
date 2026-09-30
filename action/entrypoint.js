@@ -149,7 +149,7 @@ async function main() {
     {
       cwd,
       stdio: 'inherit',
-      shell: true,
+      shell: false,
       env: {
         ...process.env,
         FORCE_COLOR: '1',

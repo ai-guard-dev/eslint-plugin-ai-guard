@@ -14,6 +14,7 @@ export function registerRunCommand(program: Command): void {
     .command('run')
     .description('Run ai-guard rules on your project (zero ESLint config required)')
     .option('--path <dir>', 'Directory or file to scan', '.')
+    .option('--preset <name>', 'Rule preset: recommended (default) | strict | security | agent')
     .option('--strict', 'Use the strict rule preset (all rules at error)')
     .option('--security', 'Use the security-only rule preset')
     .option('--json', 'Output results as JSON (CI-friendly)')
@@ -33,6 +34,7 @@ export function registerRunCommand(program: Command): void {
     .option('--sarif-output <file>', 'Write SARIF to this file instead of stdout')
     .action(async (opts: {
       path: string;
+      preset?: string;
       strict?: boolean;
       security?: boolean;
       json?: boolean;
@@ -58,13 +60,24 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
-      const preset: Preset = opts.strict
-        ? 'strict'
-        : opts.security
-        ? 'security'
-        : 'recommended';
+      let preset: Preset = 'recommended';
+      if (opts.preset) {
+        if (opts.preset === 'recommended' || opts.preset === 'strict' || opts.preset === 'security' || opts.preset === 'agent') {
+          preset = opts.preset;
+        } else {
+          log.blank();
+          log.error(`Unknown preset '${opts.preset}'. Valid presets: recommended, strict, security, agent`);
+          log.blank();
+          process.exit(1);
+          return;
+        }
+      } else if (opts.strict) {
+        preset = 'strict';
+      } else if (opts.security) {
+        preset = 'security';
+      }
 
-      if (opts.strict && opts.security && !opts.json) {
+      if (opts.strict && opts.security && !opts.json && !opts.preset) {
         log.warn('Both --strict and --security were provided. Using --strict.');
         log.blank();
       }
