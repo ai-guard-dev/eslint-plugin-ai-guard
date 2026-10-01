@@ -64,7 +64,7 @@ eslint-plugin-ai-guard/
 
 ```
 1. Parse CLI options (commander)
-2. Determine preset (recommended | strict | security)
+2. Determine preset (recommended | strict | security | agent)
 3. Resolve target path
 4. Run ESLint via eslint-runner.ts
    ├── Load flat config with ai-guard rules

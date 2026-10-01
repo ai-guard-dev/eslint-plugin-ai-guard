@@ -157,7 +157,7 @@ export function registerBaselineCommand(program: Command): void {
     .option('--check', 'Show only issues introduced since the last baseline')
     .option('--mode <name>', 'Baseline match mode: strict | stable', 'stable')
     .option('--path <dir>', 'Directory to scan', '.')
-    .option('--preset <name>', 'Preset: recommended | strict | security', 'recommended')
+    .option('--preset <name>', 'Preset: recommended | strict | security | agent', 'recommended')
     .action(async (action: string | undefined, opts: {
       save?: boolean;
       check?: boolean;

@@ -10,7 +10,7 @@ branding:
 
 inputs:
   preset:
-    description: 'Rule preset to use: recommended | strict | security'
+    description: 'Rule preset to use: recommended | strict | security | agent'
     default: 'recommended'
     required: false
 

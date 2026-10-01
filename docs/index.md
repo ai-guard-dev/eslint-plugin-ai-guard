@@ -5,6 +5,7 @@ AST-first ESLint plugin for AI-generated code pitfalls.
 - Adoption-first recommended preset
 - Strict preset for full enforcement
 - Security preset for AppSec pipelines
+- Agent preset for AI agent workflows (PostToolUse hooks)
 
 ## Start Here
 

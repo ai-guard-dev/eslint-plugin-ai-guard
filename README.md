@@ -87,7 +87,7 @@ flowchart TD
     end
 
     subgraph Tiers["3. Classification & Presets"]
-        E --> F{"Active Preset\n(recommended | strict | security)"}
+        E --> F{"Active Preset\n(recommended | strict | security | agent)"}
         F --> G["Confidence Tiering & AST Filtering"]
     end
 

@@ -51,3 +51,4 @@ All 18 rules provided by `eslint-plugin-ai-guard`, organized by category.
 | `recommended` | Start here — low noise, high-value rules enabled | No — off/warn for noisy rules |
 | `strict` | Maximum enforcement — mature codebase | Yes — all at `error` |
 | `security` | Security audit focus | Security rules only |
+| `agent` | AI agent workflows (PostToolUse hooks) | 5 high-signal rules at `error` |

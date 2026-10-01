@@ -24,3 +24,4 @@ export default [
 - `recommended`: adoption-first, low-noise defaults
 - `strict`: all rules at error
 - `security`: security-only rules
+- `agent`: focused high-signal rules for AI agent workflows

@@ -491,7 +491,7 @@ export function registerReportCommand(program: Command): void {
       'Perfect for sharing with your team or in Slack.',
     )
     .option('--path <dir>', 'Directory or file to scan', '.')
-    .option('--preset <preset>', 'Rule preset: recommended | strict | security', 'recommended')
+    .option('--preset <preset>', 'Rule preset: recommended | strict | security | agent', 'recommended')
     .option('--html', 'Generate HTML report (default behavior)')
     .option('--json', 'Output raw JSON to stdout instead of writing HTML')
     .option('--output <filename>', 'Output file name', 'ai-guard-report.html')

@@ -112,7 +112,7 @@ export function registerInitCommand(program: Command): void {
   program
     .command('init')
     .description('Configure eslint-plugin-ai-guard in this project')
-    .option('--preset <name>', 'Preset to use: recommended | strict | security', 'recommended')
+    .option('--preset <name>', 'Preset to use: recommended | strict | security | agent', 'recommended')
     .option('--flat', 'Force flat config format (eslint.config.mjs) regardless of ESLint version')
     .option('--dry-run', 'Preview what would change without writing any files')
     .option('-y, --yes', 'Skip all prompts — use defaults (recommended preset, generate workflow + agent context)')

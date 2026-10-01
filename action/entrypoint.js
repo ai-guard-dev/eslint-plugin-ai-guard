@@ -129,6 +129,8 @@ async function main() {
     cliArgs.push('--strict');
   } else if (preset === 'security') {
     cliArgs.push('--security');
+  } else if (preset === 'agent') {
+    cliArgs.push('--preset', 'agent');
   }
 
   cliArgs.push('--fail-on', failOn);

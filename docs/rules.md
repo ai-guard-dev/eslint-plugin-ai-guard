@@ -28,3 +28,4 @@ Preset summary:
 - `recommended`: adoption-first, low-noise defaults
 - `strict`: all rules at `error`
 - `security`: security-only profile
+- `agent`: focused high-signal profile for AI agent workflows

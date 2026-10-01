@@ -385,3 +385,73 @@ describe('H9: Action outputs reflect actual scan results', () => {
     }
   });
 });
+
+describe('Action preset forwarding', () => {
+  beforeEach(() => {
+    vi.spyOn(require('child_process'), 'execSync').mockImplementation(() => '');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('forwards preset: agent as --preset agent', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_PATH: 'src',
+      INPUT_PRESET: 'agent',
+      INPUT_FAIL_ON: 'high',
+      INPUT_CHANGED_ONLY: 'false',
+      INPUT_INSTALL_DEPS: 'false',
+    });
+
+    const aiGuardCall = calls.find((c) => c.args.includes('ai-guard'));
+    expect(aiGuardCall).toBeDefined();
+    const presetIdx = aiGuardCall!.args.indexOf('--preset');
+    expect(presetIdx).toBeGreaterThan(-1);
+    expect(aiGuardCall!.args[presetIdx + 1]).toBe('agent');
+  });
+
+  it('forwards preset: strict as --strict', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_PATH: 'src',
+      INPUT_PRESET: 'strict',
+      INPUT_FAIL_ON: 'high',
+      INPUT_CHANGED_ONLY: 'false',
+      INPUT_INSTALL_DEPS: 'false',
+    });
+
+    const aiGuardCall = calls.find((c) => c.args.includes('ai-guard'));
+    expect(aiGuardCall).toBeDefined();
+    expect(aiGuardCall!.args).toContain('--strict');
+  });
+
+  it('forwards preset: security as --security', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_PATH: 'src',
+      INPUT_PRESET: 'security',
+      INPUT_FAIL_ON: 'high',
+      INPUT_CHANGED_ONLY: 'false',
+      INPUT_INSTALL_DEPS: 'false',
+    });
+
+    const aiGuardCall = calls.find((c) => c.args.includes('ai-guard'));
+    expect(aiGuardCall).toBeDefined();
+    expect(aiGuardCall!.args).toContain('--security');
+  });
+
+  it('defaults to recommended with no preset flag', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_PATH: 'src',
+      INPUT_PRESET: 'recommended',
+      INPUT_FAIL_ON: 'high',
+      INPUT_CHANGED_ONLY: 'false',
+      INPUT_INSTALL_DEPS: 'false',
+    });
+
+    const aiGuardCall = calls.find((c) => c.args.includes('ai-guard'));
+    expect(aiGuardCall).toBeDefined();
+    expect(aiGuardCall!.args).not.toContain('--preset');
+    expect(aiGuardCall!.args).not.toContain('--strict');
+    expect(aiGuardCall!.args).not.toContain('--security');
+  });
+});
