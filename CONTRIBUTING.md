@@ -248,7 +248,9 @@ workflow step to diagnose the issue.
 
 ## Release Flow
 
-Releases are automated via the `release.yml` workflow. To cut a release:
+GitHub Releases are created via the `release.yml` workflow when git tags are pushed. npm packages are published manually by the maintainer after local validation.
+
+To cut a release:
 
 ```bash
 # Patch release (bug fixes)
