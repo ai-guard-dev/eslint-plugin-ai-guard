@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] — 2026-10-02
+
+### Added
+- Local MCP server for AI-agent workflows (`ai-guard-mcp`)
+- MCP tool `ai_guard_scan_file` — single-file deterministic AST analysis
+- MCP tool `ai_guard_scan_diff` — differential Git working tree scanning
+- MCP tool `ai_guard_rules` — list available rules, categories, and presets
+- Public `ai-guard-mcp` binary in `package.json`
+
+### Improved
+- `ai_guard_scan_diff` now includes newly created untracked JS/TS files inside the workspace automatically
+- Improved MCP agent-facing tool descriptions and documentation
+- Ensured deterministic workspace root synchronization in MCP server
+
+### Validation
+- Added MCP integration test coverage (`tests/cli/mcp-server.test.ts`)
+- Added untracked-file differential scanning test coverage
+
+---
+
 ## [1.3.1] — 2026-09-30
 
 ### 📝 Documentation & Count Fixes

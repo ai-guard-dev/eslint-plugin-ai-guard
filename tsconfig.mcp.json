@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/mcp/**/*.ts", "cli/utils/eslint-runner.ts", "cli/utils/git-diff.ts", "cli/utils/logger.ts", "src/rules/**/*.ts", "src/configs/**/*.ts", "src/utils/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

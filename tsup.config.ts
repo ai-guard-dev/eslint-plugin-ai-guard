@@ -29,4 +29,21 @@ export default defineConfig([
       js: '#!/usr/bin/env node',
     },
   },
+  // MCP server bundle — CJS only (required for shebang binary)
+  {
+    entry: { 'mcp/server': 'src/mcp/server.ts' },
+    format: ['cjs'],
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    splitting: false,
+    outDir: 'dist',
+    target: 'node18',
+    external: ['eslint', '@typescript-eslint/parser', '@modelcontextprotocol/sdk', 'zod'],
+    tsconfig: 'tsconfig.mcp.json',
+    banner: {
+      js: '#!/usr/bin/env node',
+    },
+  },
 ]);
+

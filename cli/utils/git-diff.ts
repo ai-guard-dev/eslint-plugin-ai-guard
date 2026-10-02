@@ -43,6 +43,8 @@ export interface ChangedFilesOptions {
   workingDirectory?: string;
   /** Enable verbose git debug output */
   debug?: boolean;
+  /** Include untracked files (defaults to true unless staged is true) */
+  includeUntracked?: boolean;
 }
 
 export interface GitDiffDebugInfo {
@@ -217,7 +219,7 @@ function tryPrDiff(
     const mergeBase = runGit(['merge-base', 'HEAD', rawBranch], cwd);
     if (mergeBase) {
       if (!debugInfo.mergeBase) debugInfo.mergeBase = mergeBase;
-      const out = runGit(`diff --name-only --diff-filter=ACMRT ${mergeBase}`, cwd);
+      const out = runGit(['diff', '--name-only', '--diff-filter=ACMRT', mergeBase], cwd);
       if (out !== null) {
         debugInfo.strategySucceeded = strategy;
         return { output: out, strategy, mergeBase };
@@ -272,6 +274,7 @@ function filterFiles(
   debugInfo: GitDiffDebugInfo,
 ): string[] {
   const kept: string[] = [];
+  const seen = new Set<string>();
 
   for (const rel of rawFiles) {
     // Normalize to POSIX separators for consistent matching
@@ -300,14 +303,16 @@ function filterFiles(
       }
     }
 
-    // Ensure file still exists on disk (may have been deleted in the PR)
     const abs = path.resolve(cwd, normalized);
     if (!fs.existsSync(abs)) {
       debugInfo.droppedMissing++;
       continue;
     }
 
-    kept.push(abs);
+    if (!seen.has(abs)) {
+      seen.add(abs);
+      kept.push(abs);
+    }
   }
 
   return kept;
@@ -343,7 +348,10 @@ export function getChangedFiles(
     extensions = DEFAULT_EXTENSIONS,
     workingDirectory,
     debug = false,
+    includeUntracked,
   } = options;
+
+  const shouldIncludeUntracked = includeUntracked ?? !staged;
 
   const debugInfo: GitDiffDebugInfo = {
     strategiesAttempted: [],
@@ -408,7 +416,17 @@ export function getChangedFiles(
     const diffResult = tryPrDiff(resolvedBranch, cwd, debugInfo);
 
     if (diffResult) {
-      rawOutput = diffResult.output;
+      const untracked = shouldIncludeUntracked
+        ? (runGit(['ls-files', '--others', '--exclude-standard'], cwd) ?? '')
+        : '';
+      if (shouldIncludeUntracked && untracked) {
+        debugInfo.strategiesAttempted.push('git ls-files --others --exclude-standard');
+      }
+      const combined = new Set([
+        ...parseFileList(diffResult.output),
+        ...parseFileList(untracked),
+      ]);
+      rawOutput = [...combined].join('\n');
     } else {
       // All strategies failed
       const shallow = debugInfo.isShallowClone
@@ -427,8 +445,18 @@ export function getChangedFiles(
     mode = 'uncommitted';
     const staged_ = runGit(['diff', '--name-only', '--cached', '--diff-filter=ACMRT'], cwd) ?? '';
     const unstaged = runGit(['diff', '--name-only', '--diff-filter=ACMRT'], cwd) ?? '';
+    const untracked = shouldIncludeUntracked
+      ? (runGit(['ls-files', '--others', '--exclude-standard'], cwd) ?? '')
+      : '';
     debugInfo.strategiesAttempted.push('git diff --cached', 'git diff (unstaged)');
-    const combined = new Set([...parseFileList(staged_), ...parseFileList(unstaged)]);
+    if (shouldIncludeUntracked) {
+      debugInfo.strategiesAttempted.push('git ls-files --others --exclude-standard');
+    }
+    const combined = new Set([
+      ...parseFileList(staged_),
+      ...parseFileList(unstaged),
+      ...parseFileList(untracked),
+    ]);
     rawOutput = [...combined].join('\n');
     if (rawOutput) debugInfo.strategySucceeded = 'uncommitted changes';
     if (!rawOutput) {

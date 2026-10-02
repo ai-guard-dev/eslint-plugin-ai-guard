@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 // Safely read version in both CJS and ESM environments
-let pkgVersion = '1.3.1'; // Fallback (keep in sync with package.json)
+let pkgVersion = '1.4.0'; // Fallback (keep in sync with package.json)
 try {
   // Use createRequire combined with import.meta.url for ESM compatibility
   const require_ = typeof require !== 'undefined' ? require : createRequire(import.meta.url);

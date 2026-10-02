@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { log } from './logger.js';
 import { AGENT_RULES } from '../../src/configs/agent.js';
@@ -430,6 +430,29 @@ async function loadPluginModuleFromCwd(cwd: string): Promise<unknown> {
       const reason = err instanceof Error ? err.message : String(err);
       log.debug(`Local src plugin import failed: ${reason}`);
     }
+  }
+
+  // Fallback: load plugin from our own package (where this module is running from)
+  try {
+    const selfRequire = createRequire(import.meta.url);
+    const selfResolved = selfRequire.resolve('eslint-plugin-ai-guard');
+    return import(pathToFileURL(selfResolved).href);
+  } catch {
+    // Fall through
+  }
+
+  try {
+    const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const selfDist = path.join(pkgRoot, 'dist', 'index.js');
+    if (fs.existsSync(selfDist)) {
+      return import(pathToFileURL(selfDist).href);
+    }
+    const selfSrc = path.join(pkgRoot, 'src', 'index.ts');
+    if (fs.existsSync(selfSrc)) {
+      return import(pathToFileURL(selfSrc).href);
+    }
+  } catch {
+    // Fall through
   }
 
   throw new Error(

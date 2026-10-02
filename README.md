@@ -33,7 +33,14 @@
 
 ## What is AI Guard?
 
-**AI Guard** (`eslint-plugin-ai-guard`) is a deterministic ESLint plugin, CLI, and GitHub Action engineered to detect reliability bugs, async hazards, security vulnerabilities, and code-scaffolding defects frequently introduced during AI-assisted development (GitHub Copilot, Cursor, Claude Code, Gemini Code Assist, etc.).
+**AI Guard** (`eslint-plugin-ai-guard`) provides:
+- **ESLint plugin** with 18 deterministic rules and 4 presets (`recommended`, `strict`, `security`, `agent`)
+- **CLI** (`ai-guard`) for terminal, changed-file, and CI scanning
+- **GitHub Action** with native SARIF 2.1.0 output for GitHub Code Scanning
+- **Claude Code integration** with a zero-config PostToolUse hook
+- **MCP server** (`ai-guard-mcp`) for local AI-agent workflows (Claude Code, Claude Desktop, Antigravity)
+
+It is engineered to detect reliability bugs, async hazards, security vulnerabilities, and code-scaffolding defects frequently introduced during AI-assisted development (GitHub Copilot, Cursor, Claude Code, Gemini Code Assist, etc.).
 
 AI Guard analyzes Abstract Syntax Trees (AST) using ESLint's native engine. It runs locally in your editor, in your terminal via the zero-config CLI, and in your CI/CD pipelines via native SARIF 2.1.0 integration with GitHub Code Scanning.
 
@@ -611,6 +618,39 @@ For the complete methodology, raw findings, and benchmark harness, see [**`docs/
 - **100% Deterministic:** Every finding is derived strictly from Abstract Syntax Tree analysis. No probabilistic drift, no non-deterministic hallucinated findings.
 - **Low False Positives:** Built with precision-first design. Context-sensitive rules are configured at `warn` or `off` in the recommended preset so developers are never blocked by noise.
 - **Self-Scanning:** AI Guard enforces its own rules on its own codebase in CI using the `strict` preset.
+
+---
+
+## MCP Server (Model Context Protocol)
+
+AI Guard includes a local MCP server that exposes its deterministic analysis engine to MCP-capable AI clients (Claude Code, Claude Desktop, and other MCP-compatible integrations).
+
+```bash
+npx ai-guard-mcp
+```
+
+**Available tools:**
+
+| Tool | Description |
+| :--- | :--- |
+| `ai_guard_scan_file` | Scan a single JS/TS file with structured findings |
+| `ai_guard_scan_diff` | Scan changed files in git diff (including newly created untracked JS/TS files) |
+| `ai_guard_rules` | List available rules and presets |
+
+**Claude Code configuration** (`.claude/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "ai-guard": {
+      "command": "npx",
+      "args": ["ai-guard-mcp"]
+    }
+  }
+}
+```
+
+For detailed documentation, tool schemas, and security model, see [**`docs/mcp-server.md`**](./docs/mcp-server.md).
 
 ---
 
