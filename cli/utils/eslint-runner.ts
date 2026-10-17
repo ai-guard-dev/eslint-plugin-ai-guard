@@ -23,6 +23,8 @@ export interface RunOptions {
   sarif?: boolean;
   /** Working directory override (monorepo subdirectory support) */
   workingDirectory?: string;
+  /** Use packaged rules/parser, never load plugin code from the scanned workspace. */
+  isolated?: boolean;
 }
 
 export interface IssueDetail {
@@ -315,7 +317,7 @@ function getRules(preset: Preset): Record<string, RuleLevel> {
 // eliminate the bulk of files in typical projects. The extended list targets
 // monorepo tooling and framework-generated directories.
 
-const DEFAULT_IGNORE_PATTERNS = [
+export const DEFAULT_IGNORE_PATTERNS = [
   // Core — always skip
   '**/node_modules/**',
   '**/.next/**',
@@ -470,8 +472,9 @@ async function getOrBuildRunner(
   cwd: string,
   preset: Preset,
   eslintCwd: string,
+  isolated = false,
 ): Promise<{ runner: CachedRunner; fromCache: boolean }> {
-  const cacheKey = `${eslintCwd}::${preset}`;
+  const cacheKey = `${eslintCwd}::${preset}::${isolated}`;
   const cached = _runnerCache.get(cacheKey);
   if (cached) {
     return { runner: cached, fromCache: true };
@@ -488,7 +491,7 @@ async function getOrBuildRunner(
     }),
 
     // 2. Load plugin
-    loadPluginModuleFromCwd(cwd),
+    isolated ? import('../../src/rules/index.js').then(({ allRules }) => ({ rules: allRules })) : loadPluginModuleFromCwd(cwd),
 
     // 3. Load TS parser (optional — errors are caught)
     Promise.resolve().then(() => {
@@ -497,6 +500,7 @@ async function getOrBuildRunner(
         // Prefer parser from user's project (correct version), fall back to ours
         let tsParser: unknown;
         try {
+          if (isolated) throw new Error('Use packaged parser');
           tsParser = require(path.join(
             cwd,
             'node_modules',
@@ -582,6 +586,7 @@ async function getOrBuildRunner(
     cwd: eslintCwd,
     overrideConfigFile: true as unknown as string,
     overrideConfig: configBlocks,
+    ...(isolated ? { allowInlineConfig: false } : {}),
   });
 
   const runner: CachedRunner = {
@@ -619,11 +624,11 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     ? path.dirname(resolvedTargetPath)
     : resolvedTargetPath;
 
-  const cwd = process.cwd();
+  const cwd = options.isolated ? eslintCwd : process.cwd();
 
   // ── Get or build cached runner ─────────────────────────────────────────────
   const initStart = Date.now();
-  const { runner, fromCache } = await getOrBuildRunner(cwd, options.preset, eslintCwd);
+  const { runner, fromCache } = await getOrBuildRunner(cwd, options.preset, eslintCwd, options.isolated);
   const initMs = Date.now() - initStart;
 
   const timing: TimingBreakdown = {
@@ -681,7 +686,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
 
-    if (isSkippablePatternError(error)) {
+    if (!options.isolated && isSkippablePatternError(error)) {
       // Single-call failed with "no files" — fall back to per-pattern
       log.debug('Single-call lintFiles failed, falling back to per-pattern');
       const perPatternResults = await Promise.allSettled(
@@ -698,12 +703,15 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
           }
         }),
       );
+      for (const result of perPatternResults) {
+        if (result.status === 'rejected') throw result.reason;
+      }
       rawResults = perPatternResults
         .filter((r): r is PromiseFulfilledResult<typeof rawResults> => r.status === 'fulfilled')
         .flatMap((r) => r.value);
     } else {
       // Invalidate the cache for this key so the next call rebuilds fresh
-      const cacheKey = `${eslintCwd}::${options.preset}`;
+      const cacheKey = `${eslintCwd}::${options.preset}::${options.isolated ?? false}`;
       _runnerCache.delete(cacheKey);
       throw error;
     }

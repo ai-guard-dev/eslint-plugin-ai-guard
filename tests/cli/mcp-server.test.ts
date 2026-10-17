@@ -218,6 +218,7 @@ async function handler() {
 
       // Should detect hardcoded secret
       const secretIssue = result.issues.find(i => i.ruleId === 'ai-guard/no-hardcoded-secret');
+      expect(secretIssue).toBeDefined();
       if (secretIssue) {
         expect(secretIssue.severity).toBe('error');
         expect(secretIssue.confidence).toBe('high');
@@ -298,9 +299,9 @@ describe('ai_guard_scan_diff', () => {
       base: 'nonexistent-branch-xyz-123',
       preset: 'agent',
     });
-    expect(result.success).toBe(true);
-    // Should not crash — returns empty or actual results
-    expect(Array.isArray(result.issues)).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.clean).toBe(false);
+    expect(result.errors[0].code).toBe('GIT_FAILED');
   });
 
   it('scans newly created untracked JS/TS file without requiring git add', async () => {

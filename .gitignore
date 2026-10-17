@@ -36,3 +36,6 @@ PROJECT-DEEP-DIVE.md
 scratch/
 ai-guard-results.sarif
 how --stat*
+
+# Agent working files and media
+.agents/

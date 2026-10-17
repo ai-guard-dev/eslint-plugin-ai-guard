@@ -240,7 +240,7 @@ export const log = {
 
   debug(msg: string): void {
     if (process.env.AI_GUARD_DEBUG === '1') {
-      console.log(`  ${chalk.gray('·')}  ${chalk.gray(msg)}`);
+      console.error(`  ${chalk.gray('·')}  ${chalk.gray(msg)}`);
     }
   },
 };

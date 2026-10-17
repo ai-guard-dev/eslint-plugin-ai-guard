@@ -88,6 +88,46 @@ export interface ChangedFilesResult {
 
 const DEFAULT_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts'];
 
+/** Strict selection for callers that must distinguish Git failure from an empty diff.
+ * Uses NUL-delimited paths and never substitutes a different base or reads CI env.
+ */
+export function getStrictChangedFiles(options: Pick<ChangedFilesOptions, 'cwd' | 'base' | 'staged'>): {
+  files: string[]; mode: 'pr-diff' | 'staged' | 'uncommitted'; base?: string;
+} {
+  const cwd = options.cwd ?? process.cwd();
+  const git = (args: string[]): string => childProcess.execFileSync('git', ['-c', 'core.fsmonitor=false', ...args], {
+    cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000,
+    maxBuffer: 1024 * 1024, shell: false,
+  });
+  const root = git(['rev-parse', '--show-toplevel']).trim();
+  const diff = ['diff', '--name-only', '-z', '--diff-filter=ACMRT'];
+  let output: string;
+  let mode: 'pr-diff' | 'staged' | 'uncommitted';
+  if (options.staged && options.base !== undefined) throw new Error('base and staged cannot be combined');
+  if (options.base !== undefined) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/~^-]*$/.test(options.base) || options.base.includes('..')) throw new Error('Invalid Git ref');
+    const commit = git(['rev-parse', '--verify', '--end-of-options', options.base + '^{commit}']).trim();
+    const mergeBase = git(['merge-base', 'HEAD', commit]).trim();
+    output = git([...diff, mergeBase, '--']);
+    mode = 'pr-diff';
+  } else if (options.staged) {
+    output = git([...diff, '--cached', '--']);
+    mode = 'staged';
+  } else {
+    output = git([...diff, '--cached', '--']) + git([...diff, '--']);
+    mode = 'uncommitted';
+  }
+  if (!options.staged) output += git(['ls-files', '--others', '--exclude-standard', '--full-name', '-z']);
+  const files = [...new Set(output.split('\0').filter(Boolean))]
+    .filter(file => DEFAULT_EXTENSIONS.includes(path.extname(file).toLowerCase()))
+    .map(file => path.resolve(root, file))
+    .filter(file => {
+      const relative = path.relative(cwd, file);
+      return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
+    });
+  return { files, mode, base: options.base };
+}
+
 const IGNORE_PREFIXES = [
   'node_modules/',
   'dist/',

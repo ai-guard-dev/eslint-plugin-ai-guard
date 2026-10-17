@@ -1,135 +1,50 @@
-/**
- * Workspace security utilities for the MCP server.
- *
- * Enforces path containment, extension validation, and prevents
- * path traversal attacks through MCP tool arguments.
- */
-
 import path from 'path';
 import fs from 'fs';
 
-// ─── Supported extensions ─────────────────────────────────────────────────────
+const EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts']);
+let workspaceRoot = process.cwd();
 
-const JS_TS_EXTENSIONS = new Set([
-  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts',
-]);
-
-// ─── Workspace root ──────────────────────────────────────────────────────────
-
-let _workspaceRoot: string = process.cwd();
-
-/**
- * Set the workspace root for path containment checks.
- * Called once at MCP server startup.
- */
-export function setWorkspaceRoot(root: string): void {
-  _workspaceRoot = path.resolve(root);
+export function canonicalWorkspace(root: string): string {
+  const real = fs.realpathSync(path.resolve(root));
+  if (!fs.statSync(real).isDirectory()) throw new Error('Workspace must be a directory');
+  return real;
 }
+export function setWorkspaceRoot(root: string): void { workspaceRoot = canonicalWorkspace(root); }
+export function getWorkspaceRoot(): string { return workspaceRoot; }
 
-/**
- * Get the current workspace root.
- */
-export function getWorkspaceRoot(): string {
-  return _workspaceRoot;
+export function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
 }
+export interface PathValidation { valid: boolean; resolvedPath: string; code?: string; error?: string }
 
-// ─── Path validation ──────────────────────────────────────────────────────────
-
-export interface PathValidation {
-  valid: boolean;
-  resolvedPath: string;
-  error?: string;
-}
-
-/**
- * Validate and resolve a path, ensuring it stays within the workspace.
- *
- * Security checks:
- * 1. Normalize Windows/POSIX separators
- * 2. Resolve to absolute path within workspace
- * 3. Reject paths that escape workspace via ../ traversal
- * 4. Reject paths outside workspace after resolution
- * 5. Verify the resolved path is within workspace using realpath where possible
- */
-export function validatePath(rawPath: string): PathValidation {
-  if (!rawPath || typeof rawPath !== 'string') {
-    return { valid: false, resolvedPath: '', error: 'Path is required' };
+export function validatePath(rawPath: string, root = workspaceRoot): PathValidation {
+  const invalid = (code: string, error: string): PathValidation => ({ valid: false, resolvedPath: '', code, error });
+  if (typeof rawPath !== 'string' || !rawPath.trim() || rawPath.includes('\0')) {
+    return invalid('INVALID_PATH', 'A nonempty path without NUL characters is required');
   }
-
-  // Normalize separators
-  const normalized = rawPath.replace(/\\/g, '/');
-
-  // Resolve relative to workspace root
-  let resolved: string;
-  if (path.isAbsolute(normalized)) {
-    resolved = path.resolve(normalized);
-  } else {
-    resolved = path.resolve(_workspaceRoot, normalized);
+  // Reject drive-relative paths, device paths, and foreign absolute paths.
+  if (/^[a-z]:[^\\/]/i.test(rawPath) || rawPath.startsWith('\\\\?\\') ||
+      rawPath.startsWith('\\\\.\\') || (process.platform !== 'win32' && /^[a-z]:/i.test(rawPath))) {
+    return invalid('INVALID_PATH', 'Use a workspace-relative path or a native absolute path');
   }
-
-  // Ensure resolved path is within workspace
-  const workspaceNorm = _workspaceRoot + path.sep;
-  if (resolved !== _workspaceRoot && !resolved.startsWith(workspaceNorm)) {
-    // Also check with forward slash for cross-platform
-    const workspaceNormFwd = _workspaceRoot.replace(/\\/g, '/') + '/';
-    const resolvedFwd = resolved.replace(/\\/g, '/');
-    if (resolvedFwd !== _workspaceRoot.replace(/\\/g, '/') && !resolvedFwd.startsWith(workspaceNormFwd)) {
-      return {
-        valid: false,
-        resolvedPath: resolved,
-        error: `Path "${rawPath}" resolves outside workspace root`,
-      };
-    }
-  }
-
-  // Try to resolve symlinks and re-check containment
+  const resolved = path.resolve(root, rawPath.replace(/\\/g, '/'));
+  if (!isWithin(path.resolve(root), resolved)) return invalid('OUTSIDE_WORKSPACE', 'Path resolves outside workspace root');
   try {
-    if (fs.existsSync(resolved)) {
-      const real = fs.realpathSync(resolved);
-      const realFwd = real.replace(/\\/g, '/');
-      const wsFwd = _workspaceRoot.replace(/\\/g, '/');
-      if (realFwd !== wsFwd && !realFwd.startsWith(wsFwd + '/')) {
-        return {
-          valid: false,
-          resolvedPath: resolved,
-          error: `Path "${rawPath}" escapes workspace via symlink`,
-        };
-      }
-    }
-  } catch {
-    // If realpath fails, the basic check above is sufficient
+    const real = fs.realpathSync(resolved);
+    if (!isWithin(canonicalWorkspace(root), real)) return invalid('OUTSIDE_WORKSPACE', 'Path escapes workspace via symlink');
+    return { valid: true, resolvedPath: real };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return invalid(code === 'ENOENT' ? 'PATH_NOT_FOUND' : 'PATH_UNREADABLE',
+      'Cannot resolve path: ' + (error instanceof Error ? error.message : String(error)));
   }
-
-  return { valid: true, resolvedPath: resolved };
 }
-
-/**
- * Check if a file has a supported JS/TS extension.
- */
-export function isSupportedExtension(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase();
-  return JS_TS_EXTENSIONS.has(ext);
-}
-
-/**
- * Validate a preset name.
- */
+export function isSupportedExtension(file: string): boolean { return EXTENSIONS.has(path.extname(file).toLowerCase()); }
 export function isValidPreset(preset: string): preset is 'recommended' | 'strict' | 'security' | 'agent' {
   return ['recommended', 'strict', 'security', 'agent'].includes(preset);
 }
-
-/**
- * Sanitize a git ref to prevent shell injection.
- * Only allow alphanumeric, hyphens, underscores, slashes, dots, and tildes.
- */
 export function sanitizeGitRef(ref: string): string | null {
-  if (!ref || typeof ref !== 'string') return null;
-  // Allow safe git ref characters only
-  if (!/^[a-zA-Z0-9._/~^-]+$/.test(ref)) return null;
-  // Reject obviously dangerous patterns
-  if (ref.includes('..') && !ref.match(/^HEAD~\d+$/)) {
-    // Allow HEAD~N but reject ../
-    if (ref.includes('../') || ref.includes('..\\')) return null;
-  }
-  return ref;
+  return typeof ref === 'string' && ref.length <= 256 && /^[a-zA-Z0-9][a-zA-Z0-9._/~^-]*$/.test(ref) &&
+    !ref.includes('..') && !ref.includes('//') ? ref : null;
 }

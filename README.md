@@ -38,7 +38,7 @@
 - **CLI** (`ai-guard`) for terminal, changed-file, and CI scanning
 - **GitHub Action** with native SARIF 2.1.0 output for GitHub Code Scanning
 - **Claude Code integration** with a zero-config PostToolUse hook
-- **MCP server** (`ai-guard-mcp`) for local AI-agent workflows (Claude Code, Claude Desktop, Antigravity)
+- **MCP server** (`ai-guard-mcp`) for local AI-agent workflows over STDIO
 
 It is engineered to detect reliability bugs, async hazards, security vulnerabilities, and code-scaffolding defects frequently introduced during AI-assisted development (GitHub Copilot, Cursor, Claude Code, Gemini Code Assist, etc.).
 
@@ -626,7 +626,7 @@ For the complete methodology, raw findings, and benchmark harness, see [**`docs/
 AI Guard includes a local MCP server that exposes its deterministic analysis engine to MCP-capable AI clients (Claude Code, Claude Desktop, and other MCP-compatible integrations).
 
 ```bash
-npx ai-guard-mcp
+npx --yes --package eslint-plugin-ai-guard ai-guard-mcp
 ```
 
 **Available tools:**
@@ -635,22 +635,25 @@ npx ai-guard-mcp
 | :--- | :--- |
 | `ai_guard_scan_file` | Scan a single JS/TS file with structured findings |
 | `ai_guard_scan_diff` | Scan changed files in git diff (including newly created untracked JS/TS files) |
+| `ai_guard_scan_project` | Scan a bounded workspace directory (current source; not yet published) |
 | `ai_guard_rules` | List available rules and presets |
 
-**Claude Code configuration** (`.claude/mcp.json`):
+**Claude Code configuration template** (project-root `.mcp.json`; client UI integration unverified):
 
 ```json
 {
   "mcpServers": {
     "ai-guard": {
-      "command": "npx",
-      "args": ["ai-guard-mcp"]
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/ai-guard/dist/mcp/server.js"],
+      "env": { "AI_GUARD_WORKSPACE": "/absolute/path/to/project" }
     }
   }
 }
 ```
 
-For detailed documentation, tool schemas, and security model, see [**`docs/mcp-server.md`**](./docs/mcp-server.md).
+The SDK in-memory and built STDIO integrations are tested. Use the built checkout to test unreleased changes. Scan, fix, then rescan; a partial or failed scan is never clean. For setup, result status, limits, and client verification scope, see [**`docs/mcp-server.md`**](./docs/mcp-server.md).
 
 ---
 

@@ -28,6 +28,9 @@ export interface McpIssue {
 
 export interface ScanResult {
   success: boolean;
+  status: 'complete' | 'partial' | 'failed';
+  clean: boolean;
+  errors: Array<{ code: string; message: string; file?: string; line?: number }>;
   filesScanned: number;
   durationMs: number;
   issues: McpIssue[];
@@ -80,6 +83,6 @@ export function toMcpIssue(issue: IssueDetail, filePath: string): McpIssue {
     message: issue.message,
     category: issue.category,
     remediation: issue.remediation,
-    fixable: false, // AI Guard rules are not auto-fixable
+    fixable: false, // MCP does not offer automatic source modification.
   };
 }
