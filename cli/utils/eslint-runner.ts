@@ -99,6 +99,8 @@ export interface RunResult {
   ecosystemIssues: EcosystemIssue[];
   /** Fatal parser errors — NOT ai-guard findings */
   parserErrors: ParserError[];
+  /** Explicitly requested files skipped by DEFAULT_IGNORE_PATTERNS (relative to cwd). Not counted in filesScanned. */
+  ignoredFiles: string[];
   /** True if @typescript-eslint/parser was found and loaded */
   tsParserAvailable: boolean;
 }
@@ -620,11 +622,33 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
 
   const targetStat = fs.statSync(resolvedTargetPath);
   const isSingleFileTarget = targetStat.isFile();
-  const eslintCwd = isSingleFileTarget
+  const targetBase = isSingleFileTarget
     ? path.dirname(resolvedTargetPath)
     : resolvedTargetPath;
 
-  const cwd = options.isolated ? eslintCwd : process.cwd();
+  // Isolated (MCP) runs never resolve anything from process.cwd().
+  const cwd = options.isolated ? targetBase : process.cwd();
+
+  // Explicit files (single-file target or `files`) as absolute paths, resolved
+  // against the same base ESLint used before.
+  const explicitFiles = options.files && options.files.length > 0
+    ? options.files.map((f) => path.resolve(targetBase, f))
+    : isSingleFileTarget
+    ? [resolvedTargetPath]
+    : null;
+
+  // Ignore globs (DEFAULT_IGNORE_PATTERNS) resolve relative to ESLint's cwd.
+  // Using the file's own directory would turn `dist/x.js` into `x.js` and
+  // silently bypass `**/dist/**`, so explicit files inside the project are
+  // linted from the project root. Files outside it keep their own directory,
+  // because ESLint ignores files outside its base path.
+  const isInsideCwd = (f: string): boolean => {
+    const rel = path.relative(cwd, f);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  const eslintCwd = explicitFiles && explicitFiles.every(isInsideCwd)
+    ? cwd
+    : targetBase;
 
   // ── Get or build cached runner ─────────────────────────────────────────────
   const initStart = Date.now();
@@ -653,12 +677,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   //     path and enables changed-file PR scanning.
   //  2. Pattern-based (full scan): use JS_TS_FILE_PATTERNS with cwd.
 
-  const hasExplicitFiles = options.files && options.files.length > 0;
-  const patterns = hasExplicitFiles
-    ? options.files!  // absolute paths — ESLint accepts them directly
-    : isSingleFileTarget
-    ? [path.basename(resolvedTargetPath)]
-    : JS_TS_FILE_PATTERNS;
+  const patterns = explicitFiles ?? JS_TS_FILE_PATTERNS; // explicit files are absolute
 
   const lintStart = Date.now();
   let rawResults: Array<{
@@ -727,7 +746,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   const ruleBreakdown = new Map<string, number>();
   let totalErrors = 0;
   let totalWarnings = 0;
-  const filesScanned = rawResults.length;
+  const ignoredFiles: string[] = [];
 
   for (const result of rawResults) {
     if (result.messages.length === 0) continue;
@@ -738,6 +757,12 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     let fileWarnings = 0;
 
     for (const m of result.messages) {
+      // ESLint's "File ignored because of a matching ignore pattern" warning
+      if (m.ruleId === null && !m.fatal && m.message.startsWith('File ignored ')) {
+        ignoredFiles.push(relPath);
+        continue;
+      }
+
       const source = classifyMessage(m);
 
       if (source === 'parser-error') {
@@ -803,6 +828,8 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     }
   }
 
+  const filesScanned = rawResults.length - ignoredFiles.length;
+
   const topFiles = [...files]
     .sort((a, b) => b.issues.length - a.issues.length)
     .slice(0, 10)
@@ -831,6 +858,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     timing,
     ecosystemIssues,
     parserErrors,
+    ignoredFiles,
     tsParserAvailable: runner.tsParserAvailable,
   };
 }

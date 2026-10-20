@@ -7,10 +7,12 @@ import { isSupportedExtension, isValidPreset, validatePath } from './workspace.j
 export const MAX_FILES = 500;
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+export const DEFAULT_MAX_ISSUES = 50;
+export const MAX_ISSUES_LIMIT = 1000;
 
 export function failure(preset: string, code: string, message: string): ScanResult {
   return { success: false, status: 'failed', clean: false, errors: [{ code, message }],
-    filesScanned: 0, durationMs: 0, issues: [], totalErrors: 0, totalWarnings: 0, preset };
+    filesScanned: 0, durationMs: 0, issues: [], totalIssues: 0, truncated: false, totalErrors: 0, totalWarnings: 0, preset };
 }
 
 /** Match the runner's default exclusions before handing it explicit files. */
@@ -24,9 +26,14 @@ export function isExcluded(relative: string): boolean {
   });
 }
 
-export async function scanFiles(files: string[], preset: string, workspace: string): Promise<ScanResult> {
+export async function scanFiles(
+  files: string[], preset: string, workspace: string, maxIssues: number = DEFAULT_MAX_ISSUES,
+): Promise<ScanResult> {
   const start = Date.now();
   if (!isValidPreset(preset)) return failure(preset, 'INVALID_PRESET', 'Unknown preset');
+  if (!Number.isInteger(maxIssues) || maxIssues < 1 || maxIssues > MAX_ISSUES_LIMIT) {
+    return failure(preset, 'INVALID_INPUT', 'maxIssues must be an integer from 1 to ' + MAX_ISSUES_LIMIT);
+  }
   if (files.length > MAX_FILES) return failure(preset, 'RESOURCE_LIMIT', 'Scan at most 500 files; choose a smaller directory');
   try {
     let bytes = 0;
@@ -45,7 +52,7 @@ export async function scanFiles(files: string[], preset: string, workspace: stri
       safeFiles.push(real);
     }
     if (!files.length) return { success: true, status: 'complete', clean: true, errors: [], filesScanned: 0,
-      durationMs: Date.now() - start, issues: [], totalErrors: 0, totalWarnings: 0, preset };
+      durationMs: Date.now() - start, issues: [], totalIssues: 0, truncated: false, totalErrors: 0, totalWarnings: 0, preset };
     const result = await runEslint({ preset, targetPath: workspace, files: [...new Set(safeFiles)], isolated: true });
     const errors: ScanResult['errors'] = [
       ...result.parserErrors.map(e => ({ code: 'PARSE_ERROR', message: e.message, file: e.filePath.replace(/\\/g, '/'), line: e.line })),
@@ -55,12 +62,19 @@ export async function scanFiles(files: string[], preset: string, workspace: stri
       errors.push({ code: 'PARSER_UNAVAILABLE', message: 'Install @typescript-eslint/parser alongside AI Guard to analyze TypeScript' });
     }
     if (result.filesScanned !== new Set(safeFiles).size) errors.push({ code: 'INCOMPLETE_SCAN', message: 'Not all requested files were analyzed' });
-    const issues = result.files.flatMap(f => f.issues.map(i => toMcpIssue(i, f.filePath.replace(/\\/g, '/'))));
-    if (issues.length > 1000) errors.push({ code: 'RESULT_LIMIT', message: 'Only the first 1000 findings are returned; narrow the scan or fix findings and rescan' });
-    return { success: errors.length === 0, status: errors.length ? 'partial' : 'complete',
+    // Errors first so truncation keeps the most important findings.
+    const issues = result.files.flatMap(f => f.issues.map(i => toMcpIssue(i, f.filePath.replace(/\\/g, '/'))))
+      .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1)
+        || a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column);
+    // Analysis errors mean the scan itself is incomplete (success=false). A response
+    // limit only truncates the list: never "complete", but not a tool failure.
+    const analysisFailed = errors.length > 0;
+    const truncated = issues.length > maxIssues;
+    if (truncated) errors.push({ code: 'RESULT_LIMIT', message: 'Only the first ' + maxIssues + ' of ' + issues.length + ' findings are returned (errors first); fix them and rescan, or raise maxIssues' });
+    return { success: !analysisFailed, status: errors.length ? 'partial' : 'complete',
       clean: errors.length === 0 && result.totalIssues === 0, errors,
       filesScanned: result.filesScanned, durationMs: Date.now() - start,
-      issues: issues.slice(0, 1000),
+      issues: issues.slice(0, maxIssues), totalIssues: issues.length, truncated,
       totalErrors: result.totalErrors, totalWarnings: result.totalWarnings, preset };
   } catch (error) {
     return { ...failure(preset, 'SCAN_FAILED', error instanceof Error ? error.message : String(error)), durationMs: Date.now() - start };

@@ -228,7 +228,7 @@ export function registerRunCommand(program: Command): void {
         } else {
           console.log(sarifJson);
         }
-        process.exit(resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
+        process.exit(scanDidNotRun(result) ? SCAN_NOT_RUN_EXIT_CODE : resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
         return;
       }
 
@@ -251,10 +251,12 @@ export function registerRunCommand(program: Command): void {
           files: result.files,
           ecosystemIssues: result.ecosystemIssues,
           parserErrors: result.parserErrors,
+          ignoredFiles: result.ignoredFiles,
+          scanRan: !scanDidNotRun(result),
           tsParserAvailable: result.tsParserAvailable,
         };
         console.log(JSON.stringify(jsonOutput, null, 2));
-        process.exit(resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
+        process.exit(scanDidNotRun(result) ? SCAN_NOT_RUN_EXIT_CODE : resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
         return;
       }
 
@@ -269,6 +271,24 @@ export function registerRunCommand(program: Command): void {
         );
       }
       log.blank();
+
+      // ── Ignored files ─────────────────────────────────────────────────────────
+      // Explicitly requested files matching AI Guard's default ignore patterns
+      // were not analyzed — never report them as clean.
+
+      if (result.ignoredFiles.length > 0) {
+        log.print(
+          `  ${chalk.yellow('⚠')}  ${chalk.bold.yellow(`${result.ignoredFiles.length} file${result.ignoredFiles.length !== 1 ? 's' : ''} not analyzed`)}  ${chalk.gray('— matched AI Guard default ignore patterns (node_modules, dist, build, generated, …)')}`,
+        );
+        for (const f of result.ignoredFiles.slice(0, 10)) log.print(chalk.dim(`     ${f}`));
+        log.blank();
+        if (scanDidNotRun(result)) {
+          log.print(`  ${chalk.red('✖')}  ${chalk.bold.red('Scan did not run')}  ${chalk.gray('— no files were analyzed')}`);
+          log.blank();
+          process.exit(SCAN_NOT_RUN_EXIT_CODE);
+          return;
+        }
+      }
 
       // ── Success state ─────────────────────────────────────────────────────────
 
@@ -615,6 +635,17 @@ function renderSingleIssue(issue: { ruleId: string; severity: 1 | 2; message: st
 }
 
 // ─── Exit code ────────────────────────────────────────────────────────────────
+
+/** Exit code when every explicitly requested file was ignored (nothing analyzed). Findings use 1. */
+export const SCAN_NOT_RUN_EXIT_CODE = 2;
+
+/**
+ * True when explicitly requested files were all ignored. Directory scans never
+ * hit this: glob traversal skips ignored files without reporting them.
+ */
+export function scanDidNotRun(result: RunResult): boolean {
+  return result.filesScanned === 0 && result.ignoredFiles.length > 0;
+}
 
 export function getRunExitCode(result: RunResult, maxWarnings?: number): number {
   if (result.totalErrors > 0) return 1;

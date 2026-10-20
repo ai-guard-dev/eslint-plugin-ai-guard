@@ -88,8 +88,12 @@ describe('MCP failure propagation', () => {
     vi.spyOn(runner, 'runEslint').mockResolvedValue({ ...empty, totalIssues: 1001, totalErrors: 1001,
       files: [{ filePath: 'test.ts', errorCount: 1001, warningCount: 0, issues: Array.from({ length: 1001 }, () => issue) }] });
     const result = await scanFile({ path: 'test.ts' }, root);
-    expect(result).toMatchObject({ status: 'partial', clean: false, totalErrors: 1001, errors: [expect.objectContaining({ code: 'RESULT_LIMIT' })] });
-    expect(result.issues).toHaveLength(1000);
+    // Truncation is not an analysis failure (success stays true) but is never complete or clean.
+    expect(result).toMatchObject({ success: true, status: 'partial', clean: false, truncated: true, totalIssues: 1001,
+      totalErrors: 1001, errors: [expect.objectContaining({ code: 'RESULT_LIMIT' })] });
+    expect(result.issues).toHaveLength(50);
+    expect((await scanFile({ path: 'test.ts', maxIssues: 1000 }, root)).issues).toHaveLength(1000);
+    expect(await scanFile({ path: 'test.ts', maxIssues: 1001 }, root)).toMatchObject({ status: 'failed', errors: [{ code: 'INVALID_INPUT' }] });
   });
   it('does not load a workspace dist entry or allow inline rule disabling', async () => {
     fs.mkdirSync(path.join(root, 'dist'));

@@ -14,6 +14,7 @@ function makeResult(overrides: Partial<RunResult> = {}): RunResult {
     durationMs: 0,
     ecosystemIssues: [],
     parserErrors: [],
+    ignoredFiles: [],
     tsParserAvailable: true,
     ...overrides,
   };

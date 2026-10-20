@@ -48,7 +48,7 @@ ai-guard run --path src --strict --json
 
 ## Notes
 
-- If `--path` points to a file, only that file is scanned.
+- If `--path` points to a file, only that file is scanned. AI Guard's built-in ignore patterns (`node_modules/`, `dist/`, `build/`, `generated/`, `vendor/`, …) are matched relative to the current directory, so an explicitly named file under an ignored directory is reported as "Scan did not run" with exit code `2` (listed in `ignoredFiles` with `--json`), never as clean. Your project's ESLint config is not loaded.
 - If `--path` does not exist, the command exits with an error.
 - If both `--strict` and `--security` are passed, `--strict` takes precedence.
 
@@ -134,6 +134,7 @@ When using `--json`, output is written to stdout:
 |---|---|
 | `0` | Success — no errors (warnings may exist unless `--max-warnings` is set) |
 | `1` | Errors found, or `--max-warnings` exceeded |
+| `2` | Scan did not run — the file passed to `--path` matched a built-in ignore pattern, so nothing was analyzed (`"scanRan": false` in `--json`). Directory scans never exit `2` for ignored files; those are skipped silently |
 
 ## Presets
 

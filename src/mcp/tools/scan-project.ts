@@ -4,7 +4,7 @@ import type { ScanResult } from '../types.js';
 import { getWorkspaceRoot, isSupportedExtension, validatePath } from '../utils/workspace.js';
 import { failure, isExcluded, MAX_FILES, scanFiles } from '../utils/scan.js';
 
-export async function scanProject(input: { path?: string; preset?: string; maxFiles?: number }, workspace = getWorkspaceRoot()): Promise<ScanResult> {
+export async function scanProject(input: { path?: string; preset?: string; maxFiles?: number; maxIssues?: number }, workspace = getWorkspaceRoot()): Promise<ScanResult> {
   const preset = input.preset ?? 'agent';
   const maxFiles = input.maxFiles ?? MAX_FILES;
   if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > MAX_FILES) return failure(preset, 'INVALID_INPUT', 'maxFiles must be an integer from 1 to 500');
@@ -35,7 +35,7 @@ export async function scanProject(input: { path?: string; preset?: string; maxFi
       } finally { handle.closeSync(); }
     };
     visit(checked.resolvedPath, 0);
-    return await scanFiles(files, preset, workspace);
+    return await scanFiles(files, preset, workspace, input.maxIssues);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = message.startsWith('RESOURCE_LIMIT:') ? 'RESOURCE_LIMIT' : message.startsWith('SYMLINK_IN_PROJECT:') ? 'SYMLINK_IN_PROJECT' : 'SCAN_FAILED';

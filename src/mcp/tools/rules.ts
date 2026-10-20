@@ -7,6 +7,9 @@
  */
 
 import { allRules } from '../../rules/index.js';
+import recommended from '../../configs/recommended.js';
+import strict from '../../configs/strict.js';
+import security from '../../configs/security.js';
 import { AGENT_RULES } from '../../configs/agent.js';
 import {
   ISSUE_CONFIDENCE,
@@ -16,78 +19,60 @@ import {
 import { isValidPreset } from '../utils/workspace.js';
 import type { RulesResult, RuleInfo } from '../types.js';
 
-// Preset rule maps — reuse from eslint-runner's logic without re-importing private vars
-// These are the canonical definitions
-const PRESET_RULES: Record<string, Record<string, 'error' | 'warn' | 'off'>> = {
-  recommended: {
-    'ai-guard/no-empty-catch': 'error',
-    'ai-guard/no-broad-exception': 'warn',
-    'ai-guard/no-floating-promise': 'error',
-    'ai-guard/no-await-in-loop': 'warn',
-    'ai-guard/no-async-without-await': 'warn',
-    'ai-guard/no-async-array-callback': 'warn',
-    'ai-guard/no-hardcoded-secret': 'error',
-    'ai-guard/no-eval-dynamic': 'error',
-    'ai-guard/no-sql-string-concat': 'warn',
-    'ai-guard/no-unsafe-deserialize': 'warn',
-    'ai-guard/require-auth-middleware': 'warn',
-    'ai-guard/require-authz-check': 'warn',
-    'ai-guard/no-dead-branch': 'warn',
-  },
-  strict: {
-    'ai-guard/no-empty-catch': 'error',
-    'ai-guard/no-broad-exception': 'error',
-    'ai-guard/no-catch-log-rethrow': 'error',
-    'ai-guard/no-catch-without-use': 'error',
-    'ai-guard/no-async-array-callback': 'error',
-    'ai-guard/no-floating-promise': 'error',
-    'ai-guard/no-await-in-loop': 'error',
-    'ai-guard/no-async-without-await': 'error',
-    'ai-guard/no-redundant-await': 'error',
-    'ai-guard/no-hardcoded-secret': 'error',
-    'ai-guard/no-eval-dynamic': 'error',
-    'ai-guard/no-sql-string-concat': 'error',
-    'ai-guard/no-unsafe-deserialize': 'error',
-    'ai-guard/require-auth-middleware': 'error',
-    'ai-guard/require-authz-check': 'error',
-    'ai-guard/no-console-in-handler': 'error',
-    'ai-guard/no-duplicate-logic-block': 'error',
-    'ai-guard/no-dead-branch': 'error',
-  },
-  security: {
-    'ai-guard/no-hardcoded-secret': 'error',
-    'ai-guard/no-eval-dynamic': 'error',
-    'ai-guard/no-sql-string-concat': 'error',
-    'ai-guard/no-unsafe-deserialize': 'warn',
-    'ai-guard/require-auth-middleware': 'warn',
-    'ai-guard/require-authz-check': 'warn',
-  },
+type RuleLevel = 'error' | 'warn' | 'off';
+
+/** Enabled rules per preset, derived from the canonical preset configs. */
+function enabledRules(rules: Record<string, unknown> | undefined): Record<string, RuleLevel> {
+  const out: Record<string, RuleLevel> = {};
+  for (const [ruleId, level] of Object.entries(rules ?? {})) {
+    if (level === 'error' || level === 'warn') out[ruleId] = level;
+  }
+  return out;
+}
+
+const PRESET_RULES: Record<string, Record<string, RuleLevel>> = {
+  recommended: enabledRules(recommended.rules),
+  strict: enabledRules(strict.rules),
+  security: enabledRules(security.rules),
   agent: AGENT_RULES,
 };
 
 export interface RulesInput {
   preset?: string;
+  /** Rule IDs to return full details for, with or without the "ai-guard/" prefix. */
+  rules?: string[];
+}
+
+interface RuleMeta {
+  meta?: { docs?: { description?: string; url?: string } };
 }
 
 export function getRules(input: RulesInput): RulesResult {
   const allRuleNames = Object.keys(allRules);
   const presetNames = Object.keys(PRESET_RULES);
 
+  const requested = (input.rules ?? []).map(r => r.trim().replace(/^ai-guard\//, ''));
+  const selected = requested.length > 0
+    ? allRuleNames.filter(name => requested.includes(name))
+    : allRuleNames;
+
   // Build full rule info from existing metadata
-  const rules: RuleInfo[] = allRuleNames.map(name => {
+  const rules: RuleInfo[] = selected.map(name => {
     const ruleId = `ai-guard/${name}`;
-    const severity: Record<string, 'error' | 'warn' | 'off'> = {};
+    const severity: Record<string, RuleLevel> = {};
     for (const [presetName, presetRules] of Object.entries(PRESET_RULES)) {
       severity[presetName] = presetRules[ruleId] ?? 'off';
     }
+    const docs = (allRules[name as keyof typeof allRules] as RuleMeta).meta?.docs;
 
     return {
       ruleId,
       category: ISSUE_CATEGORY[ruleId] ?? 'Unknown',
       confidence: ISSUE_CONFIDENCE[ruleId] ?? 'unknown',
       severity,
-      description: ISSUE_REMEDIATION[ruleId]?.split('.')[0] ?? '',
+      description: docs?.description ?? ISSUE_REMEDIATION[ruleId]?.split('.')[0] ?? '',
       remediation: ISSUE_REMEDIATION[ruleId] ?? '',
+      docsUrl: docs?.url,
     };
   });
 
@@ -97,6 +82,12 @@ export function getRules(input: RulesInput): RulesResult {
     presets: presetNames,
     rules,
   };
+
+  const unknown = requested.filter(name => !allRuleNames.includes(name));
+  if (unknown.length > 0) {
+    result.unknownRules = unknown;
+    result.success = rules.length > 0;
+  }
 
   // If a specific preset was requested, include its rule list
   if (input.preset && isValidPreset(input.preset)) {

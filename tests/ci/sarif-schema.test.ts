@@ -59,6 +59,7 @@ function makeResult(ruleIds: string[]): RunResult {
     topFiles: [{ filePath: 'src/handler.ts', issueCount: ruleIds.length }],
     ecosystemIssues: [],
     parserErrors: [],
+    ignoredFiles: [],
     tsParserAvailable: true,
   };
 }
@@ -551,6 +552,7 @@ describe('GitHub Code Scanning compatibility', () => {
       topFiles: [],
       ecosystemIssues: [],
       parserErrors: [],
+      ignoredFiles: [],
       tsParserAvailable: true,
     };
     const sarif = buildSarifLog(result);

@@ -272,6 +272,8 @@ npx ai-guard <command> [options]
 | `preset` | Interactively select and switch active preset in config | (Interactive prompt with automatic config patch & backup) |
 | `ignore` | Add standard ignore paths (`.next`, `dist`, `build`) to config | (Patches flat config or legacy ignores safely) |
 
+**`run` exit codes:** `0` no errors · `1` errors found (or `--max-warnings` exceeded) · `2` scan did not run — the file passed to `--path` matches a built-in ignore pattern (`node_modules/`, `dist/`, `build/`, `generated/`, `vendor/`, …), so nothing was analyzed. Directory scans skip ignored files silently and never exit `2`.
+
 ### CLI Usage Examples
 
 ```bash
@@ -636,9 +638,11 @@ npx --yes --package eslint-plugin-ai-guard ai-guard-mcp
 | `ai_guard_scan_file` | Scan a single JS/TS file with structured findings |
 | `ai_guard_scan_diff` | Scan changed files in git diff (including newly created untracked JS/TS files) |
 | `ai_guard_scan_project` | Scan a bounded workspace directory (current source; not yet published) |
-| `ai_guard_rules` | List available rules and presets |
+| `ai_guard_rules` | List rules and presets, or look up specific rules (`rules: ["no-floating-promise"]`) with remediation and docs link |
 
-**Claude Code configuration template** (project-root `.mcp.json`; client UI integration unverified):
+All tools declare an `outputSchema`; the text content is the same result as compact JSON. Scan tools accept `maxIssues` (default 50, errors first, exact `totalIssues` and `truncated`). The `verify_changes` prompt runs the scan → fix → rescan loop.
+
+**Claude Code configuration** (project-root `.mcp.json`):
 
 ```json
 {
@@ -653,7 +657,7 @@ npx --yes --package eslint-plugin-ai-guard ai-guard-mcp
 }
 ```
 
-The SDK in-memory and built STDIO integrations are tested. Use the built checkout to test unreleased changes. Scan, fix, then rescan; a partial or failed scan is never clean. For setup, result status, limits, and client verification scope, see [**`docs/mcp-server.md`**](./docs/mcp-server.md).
+The SDK in-memory and built STDIO integrations are tested, plus a headless Claude Code CLI smoke test (see the MCP guide for scope). Use the built checkout to test unreleased changes. Scan, fix, then rescan; a partial or failed scan is never clean. For setup, result status, limits, and client verification scope, see [**`docs/mcp-server.md`**](./docs/mcp-server.md).
 
 ---
 

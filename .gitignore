@@ -39,3 +39,15 @@ how --stat*
 
 # Agent working files and media
 .agents/
+
+# Launch video assets and generated brag output (local only)
+*.mp4
+brag-output/
+final_qa_frames/
+openmontage/
+video-capture/
+video-composition/
+video-assets.md
+video-brand-reference.md
+video-facts.md
+screen-demo-plan.md

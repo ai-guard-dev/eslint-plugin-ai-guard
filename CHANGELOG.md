@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed (MCP)
+- Result contract: `success`, `status` (`complete` | `partial` | `failed`), `clean`, and machine-readable `errors[{code, message, file?, line?}]`. Only `status:"complete"` with `clean:true` is a clean scan; parse errors, skipped files, Git failures and invalid input are never reported as clean.
+- All tools declare an `outputSchema` and return `structuredContent`; the text content is the same object as compact JSON, so `JSON.parse(content[0].text)` consumers keep working.
+- Scan tools accept `maxIssues` (default **50**, max 1000). Findings are sorted errors first; `totalIssues` counts every finding and `truncated` flags a cut list. Truncation yields `partial` + `RESULT_LIMIT` but keeps `success:true` (analysis completed).
+- New `ai_guard_scan_project` tool for bounded directory scans (500 files, 1 MiB/file, 20 MiB total, no symlink traversal).
+- `ai_guard_scan_diff` uses strict Git selection: no silent `HEAD~1` fallback, no implicit `GITHUB_BASE_REF`; `base` + `staged` is rejected.
+- `ai_guard_rules` accepts `rules: [...]` for targeted lookup (description, remediation, `docsUrl`) and reports `unknownRules`.
+- New `verify_changes` MCP prompt (scan → fix → rescan).
+- MCP scans run isolated: bundled rules/parser only, no plugin code or inline ESLint directives from the scanned workspace. One tool call at a time (`SERVER_BUSY`).
+- `zod` is now a declared dependency.
+
+### Fixed
+- Explicit file scans (`ai-guard run --path <file>`, the Claude PostToolUse hook) bypassed the built-in ignore patterns because they were resolved against the file's own directory. They now resolve against the current directory; ignored files are reported in `RunResult.ignoredFiles` (and not counted in `filesScanned`) instead of as an ESLint config issue or as clean.
+- `ai-guard run --path <file>` exits with code **2** and reports "Scan did not run" (`"scanRan": false` in `--json`) when the requested file is ignored and nothing is analyzed. Finding exit codes (`0`/`1`) are unchanged; directory scans and `ai-guard changed` are unaffected.
+- Debug logging goes to stderr so `--json` / SARIF stdout stays parseable.
+
+---
+
 ## [1.4.0] — 2026-10-02
 
 ### Added

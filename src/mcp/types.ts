@@ -33,7 +33,11 @@ export interface ScanResult {
   errors: Array<{ code: string; message: string; file?: string; line?: number }>;
   filesScanned: number;
   durationMs: number;
+  /** At most maxIssues findings, errors first. */
   issues: McpIssue[];
+  /** Every finding, even when issues is truncated. */
+  totalIssues: number;
+  truncated: boolean;
   totalErrors: number;
   totalWarnings: number;
   preset: string;
@@ -52,6 +56,7 @@ export interface RuleInfo {
   severity: Record<string, 'error' | 'warn' | 'off'>;
   description: string;
   remediation: string;
+  docsUrl?: string;
 }
 
 export interface RulesResult {
@@ -61,6 +66,7 @@ export interface RulesResult {
   rules: RuleInfo[];
   preset?: string;
   presetRules?: string[];
+  unknownRules?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
