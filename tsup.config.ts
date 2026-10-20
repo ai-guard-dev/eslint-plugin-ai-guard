@@ -39,7 +39,9 @@ export default defineConfig([
     splitting: false,
     outDir: 'dist',
     target: 'node18',
-    external: ['eslint', '@typescript-eslint/parser', '@modelcontextprotocol/sdk', 'zod'],
+    // Only eslint and the TS parser (peers) stay external. The MCP SDK, zod and chalk
+    // are bundled (they are devDependencies) so `npx` doesn't install ~90 extra packages.
+    external: ['eslint', '@typescript-eslint/parser'],
     tsconfig: 'tsconfig.mcp.json',
     banner: {
       js: '#!/usr/bin/env node',

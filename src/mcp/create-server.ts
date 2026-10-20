@@ -71,7 +71,7 @@ const readOnly = { readOnlyHint: true, openWorldHint: false };
 
 export function createMcpServer(root: string): McpServer {
   const workspace = canonicalWorkspace(root);
-  const server = new McpServer({ name: 'ai-guard', version: '1.4.1' }, {
+  const server = new McpServer({ name: 'ai-guard', version: '1.4.2' }, {
     instructions: 'Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, and rules to inspect presets or look up a rule.',
   });
   const preset = z.enum(['recommended', 'strict', 'security', 'agent']);

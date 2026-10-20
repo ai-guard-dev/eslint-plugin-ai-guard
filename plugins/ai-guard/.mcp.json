@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "ai-guard": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "--package=eslint-plugin-ai-guard@1.4.2",
+        "--package=eslint@9.39.5",
+        "--package=@typescript-eslint/parser@8.72.0",
+        "ai-guard-mcp"
+      ],
+      "env": {
+        "AI_GUARD_WORKSPACE": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

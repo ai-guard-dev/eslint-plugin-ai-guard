@@ -1,0 +1,26 @@
+{
+  "name": "ai-guard",
+  "displayName": "AI Guard",
+  "version": "1.4.2",
+  "description": "Deterministic static-analysis guardrails for AI-generated JavaScript and TypeScript. Scans your changes, a file, or a directory for floating promises, empty catch blocks, hardcoded secrets, SQL injection, unsafe eval and more, then guides Claude to fix and rescan. Runs locally and never edits files itself.",
+  "author": {
+    "name": "YashJadhav21",
+    "url": "https://github.com/YashJadhav21"
+  },
+  "homepage": "https://getaiguard.dev/",
+  "repository": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard",
+  "license": "MIT",
+  "keywords": [
+    "eslint",
+    "static-analysis",
+    "security",
+    "javascript",
+    "typescript",
+    "code-review",
+    "async",
+    "ai-generated-code"
+  ],
+  "icon": "./icon.png",
+  "documentationUrl": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/mcp-server.md",
+  "supportUrl": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard/issues"
+}

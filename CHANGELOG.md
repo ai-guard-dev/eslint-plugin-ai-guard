@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.2] — unreleased
+
+### Changed
+- Runtime `dependencies` reduced from 8 packages to 1 (`@typescript-eslint/utils`). The MCP SDK, `zod`, `chalk`, `ora`, `commander` and `@inquirer/prompts` are now bundled into `dist/` and moved to `devDependencies`; the unused `tsx` dependency is removed. The CLI, MCP server and ESLint plugin behave as before. Tool results, rules and the CLI's output are unchanged.
+- Installing the MCP server with `npx` (ai-guard + eslint + @typescript-eslint/parser) now pulls ~112 packages / ~44 MB instead of ~246 packages / ~69 MB. In our cold-cache tests (empty npm cache, same machine) the MCP server typically connected in 15–25 s, with occasional runs at about 30 s, versus 32–35 s in every run of 1.4.1 (Claude Code's default MCP startup timeout is 30 s). ESLint and TypeScript themselves account for most of the remaining time, so a very slow first download can still exceed the timeout.
+- `THIRD-PARTY-NOTICES.md` is published with the package and lists the license texts of the bundled packages (`npm run notices` regenerates it from the bundles' source maps).
+- The npm tarball is larger (~1.4 MB, up from ~0.5 MB) because those dependencies are now bundled.
+
+---
+
 ## [1.4.1] — 2026-10-20
 
 ### Fixed
