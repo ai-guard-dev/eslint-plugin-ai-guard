@@ -25,7 +25,8 @@ export async function scanProject(input: { path?: string; preset?: string; maxFi
           if (++entries > 20000) throw new Error('RESOURCE_LIMIT: More than 20000 directory entries');
           const file = path.join(directory, entry.name);
           if (isExcluded(path.relative(workspace, file))) continue;
-          if (entry.isSymbolicLink()) throw new Error('SYMLINK_IN_PROJECT: Narrow the scan or use scan_file for individually validated symlinks: ' + file);
+          // Node 20 on Windows reports junctions as plain directories in Dirent; lstat is reliable.
+          if (entry.isSymbolicLink() || (entry.isDirectory() && fs.lstatSync(file).isSymbolicLink())) throw new Error('SYMLINK_IN_PROJECT: Narrow the scan or use scan_file for individually validated symlinks: ' + file);
           if (entry.isDirectory()) visit(file, depth + 1);
           else if (entry.isFile() && isSupportedExtension(file)) {
             files.push(file);

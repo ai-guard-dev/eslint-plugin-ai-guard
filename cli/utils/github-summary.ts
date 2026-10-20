@@ -96,8 +96,15 @@ function tierLabel(tier: ConfidenceTier | undefined): string {
  * These appear as inline code review comments on PRs.
  *
  * Format: ::error file=path,line=N,endLine=N,col=N,title=RuleId::Message
+ *
+ * `stream` defaults to stdout. Pass process.stderr when stdout carries
+ * machine-readable output (--json, SARIF): the runner parses workflow commands
+ * from stderr too, and stdout must stay valid JSON.
  */
-export function emitGitHubAnnotations(result: RunResult): void {
+export function emitGitHubAnnotations(
+  result: RunResult,
+  stream: Pick<NodeJS.WriteStream, 'write'> = process.stdout,
+): void {
   if (process.env.GITHUB_ACTIONS !== 'true') return;
 
   for (const file of result.files) {
@@ -120,7 +127,7 @@ export function emitGitHubAnnotations(result: RunResult): void {
 
       // Message is escaped — GitHub strips markdown in annotations
       const msg = issue.message.replace(/\n/g, ' ');
-      process.stdout.write(`::${level} ${parts.join(',')}::${msg}\n`);
+      stream.write(`::${level} ${parts.join(',')}::${msg}\n`);
     }
   }
 }

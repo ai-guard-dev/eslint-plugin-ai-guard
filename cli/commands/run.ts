@@ -77,17 +77,20 @@ export function registerRunCommand(program: Command): void {
         preset = 'security';
       }
 
-      if (opts.strict && opts.security && !opts.json && !opts.preset) {
+      // stdout carries JSON or SARIF: nothing else may be written to it.
+      const machineStdout = Boolean(opts.json) || (Boolean(opts.sarif) && !opts.sarifOutput);
+
+      if (opts.strict && opts.security && !machineStdout && !opts.preset) {
         log.warn('Both --strict and --security were provided. Using --strict.');
         log.blank();
       }
 
-      if (!opts.json) {
+      if (!machineStdout) {
         log.banner('AI GUARD');
         log.blank();
       }
 
-      const spinner = opts.json
+      const spinner = machineStdout
         ? null
         : ora({ text: 'Scanning…', color: 'cyan' }).start();
 
@@ -126,7 +129,8 @@ export function registerRunCommand(program: Command): void {
 
       // Auto-enable in GitHub Actions: annotations + step summary
       if (isGitHubActions()) {
-        emitGitHubAnnotations(result);
+        // Annotations go to stderr when stdout is reserved for JSON/SARIF.
+        emitGitHubAnnotations(result, machineStdout ? process.stderr : process.stdout);
         writeGitHubSummary(result, { preset, scanMode: 'full' });
         writeGitHubOutputs(result);
       }

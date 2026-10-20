@@ -269,7 +269,9 @@ function handleResults(
   if (inCI || opts.githubSummary) {
     writeGitHubSummary(result, { preset, scanMode, changedFilesCount });
     writeGitHubOutputs(result, opts.sarifOutput);
-    emitGitHubAnnotations(result);
+    // stdout must stay valid JSON/SARIF when it carries machine-readable output.
+    const stdoutIsData = opts.json || (Boolean(opts.sarif) && !resolvedSarifPath);
+    emitGitHubAnnotations(result, stdoutIsData ? process.stderr : process.stdout);
   }
 
   // ── SARIF mode ─────────────────────────────────────────────────────────────
