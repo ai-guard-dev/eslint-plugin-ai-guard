@@ -60,7 +60,7 @@ Only a result with `status: "complete"` and `clean: true` counts as clean. A `pa
 
 - **Downloads:** when the plugin is installed, Claude Code installs the packages pinned in `package-lock.json` (`eslint-plugin-ai-guard@1.4.2`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0` and their dependencies) from the npm registry into the plugin's folder. Nothing is downloaded when the server starts.
 - **Runs:** a local Node.js process (`node_modules/eslint-plugin-ai-guard/dist/mcp/server.js`) that talks to Claude Code over STDIO. It runs read-only `git` commands (`rev-parse`, `diff`, `merge-base`, `ls-files`) for diff scans.
-- **Reads:** JS/TS files inside the project directory (`AI_GUARD_WORKSPACE` is set to `${CLAUDE_PROJECT_DIR}`). Paths outside it, including through symlinks, are rejected.
+- **Reads:** JS/TS files inside the project directory Claude Code starts the server in. Paths outside it, including through symlinks, are rejected.
 - **Doesn't:** the AI Guard server makes no network requests, sends no telemetry, writes or modifies no files, loads no ESLint plugins or configuration from your project, and ignores inline `eslint-disable` comments.
 
 Findings are returned to Claude Code like any other tool result, so they are part of your conversation with Claude.

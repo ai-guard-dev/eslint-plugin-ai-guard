@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "ai-guard": {
-      "command": "sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.sh"],
-      "env": {
-        "AI_GUARD_WORKSPACE": "${CLAUDE_PROJECT_DIR}"
-      }
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.cjs"]
     }
   }
 }
