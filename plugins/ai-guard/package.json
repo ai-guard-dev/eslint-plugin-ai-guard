@@ -1,0 +1,12 @@
+{
+  "name": "ai-guard-plugin-runtime",
+  "version": "1.4.2",
+  "private": true,
+  "description": "Pinned runtime for the AI Guard Claude plugin MCP server.",
+  "license": "MIT",
+  "dependencies": {
+    "@typescript-eslint/parser": "8.72.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-ai-guard": "1.4.2"
+  }
+}
