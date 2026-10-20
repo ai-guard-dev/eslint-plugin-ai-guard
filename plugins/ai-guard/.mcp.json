@@ -2,7 +2,7 @@
   "mcpServers": {
     "ai-guard": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/node_modules/eslint-plugin-ai-guard/dist/mcp/server.js"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.cjs"],
       "env": {
         "AI_GUARD_WORKSPACE": "${CLAUDE_PROJECT_DIR}"
       }
