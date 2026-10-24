@@ -36,38 +36,63 @@ jobs:
       - name: Run the AI Guard Action
         id: guard
         uses: ./
-        env:
-          # On push events there is no PR base; compare with main explicitly.
-          GITHUB_BASE_REF: ${{ github.base_ref || 'main' }}
         with:
           changed-only: 'true'
           integrity: report
           fail-on: none
           install-deps: 'false'
           sarif-output: ai-guard-results.sarif
+          base-ref: ${{ github.base_ref || 'main' }}
       - name: Same findings in SARIF, JSON and Action outputs
         env:
           HIGH: ${{ steps.guard.outputs.integrity-high-count }}
           ADVISORY: ${{ steps.guard.outputs.integrity-advisory-count }}
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
-          node dist/cli/index.js changed --base main --integrity report --json --fail-on none > changed.json || true
+          node dist/cli/index.js changed --base "$BASE_REF" --integrity report --json --fail-on none > changed.json || true
           node - <<'EOF'
           const fs = require('fs');
           const sarif = JSON.parse(fs.readFileSync('ai-guard-results.sarif', 'utf8'));
           const json = JSON.parse(fs.readFileSync('changed.json', 'utf8'));
-          const integ = sarif.runs[0].results.filter((r) => r.properties && r.properties.aiGuardIntegrity);
-          const sarifIds = integ.map((r) => `${r.ruleId}:${r.locations[0].physicalLocation.artifactLocation.uri}`).sort();
-          const jsonIds = json.integrity.findings.map((f) => `${f.ruleId}:${f.file}`).sort();
+
+          // Verify SARIF structure is valid and from the current run
+          const run = sarif.runs && sarif.runs[0];
+          if (!run) { console.error('::error::SARIF has no runs'); process.exit(1); }
+          if (run.properties && run.properties.analysisError) {
+            console.error('::error::SARIF run contains an analysis error:', run.properties.analysisError);
+            process.exit(1);
+          }
+
+          const integ = (run.results || []).filter((r) => r.properties && r.properties.aiGuardIntegrity);
+          const sarifIds = integ.map((r) => {
+            const loc = r.locations && r.locations[0] && r.locations[0].physicalLocation;
+            const uri = loc && loc.artifactLocation && loc.artifactLocation.uri;
+            return `${r.ruleId}:${uri || 'unknown'}`;
+          }).sort();
+
+          const jsonIds = (json.integrity && json.integrity.findings || []).map((f) => `${f.ruleId}:${f.file}`).sort();
+
           console.log('SARIF integrity results:', sarifIds);
           console.log('JSON integrity findings:', jsonIds);
           console.log('Action outputs: high=%s advisory=%s', process.env.HIGH, process.env.ADVISORY);
+
           const high = integ.filter((r) => r.properties.integrityTier === 'high').length;
+          const advisory = integ.length - high;
           const fail = (m) => { console.error('::error::' + m); process.exit(1); };
-          if (JSON.stringify(sarifIds) !== JSON.stringify(jsonIds)) fail('SARIF and JSON integrity findings differ');
+
+          // Verify Action output counts against SARIF
           if (String(high) !== process.env.HIGH) fail(`integrity-high-count ${process.env.HIGH} != SARIF ${high}`);
-          if (String(integ.length - high) !== process.env.ADVISORY) fail('integrity-advisory-count differs from SARIF');
-          if (json.integrity.mode !== 'report' || json.integrity.error) fail('integrity did not run in report mode');
-          console.log('consistent');
+          if (String(advisory) !== process.env.ADVISORY) fail(`integrity-advisory-count ${process.env.ADVISORY} != SARIF advisory=${advisory}`);
+
+          // Verify JSON CLI and SARIF used the same base and found the same findings
+          if (JSON.stringify(sarifIds) !== JSON.stringify(jsonIds)) {
+            console.error('SARIF IDs:', sarifIds);
+            console.error('JSON IDs:', jsonIds);
+            fail('SARIF and JSON integrity findings differ');
+          }
+
+          if (json.integrity && (json.integrity.mode !== 'report' || json.integrity.error)) fail('integrity did not run in report mode');
+          console.log('✓ consistent');
           EOF
 
   shallow-clone:

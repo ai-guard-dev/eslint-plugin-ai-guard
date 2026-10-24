@@ -582,3 +582,97 @@ describe('integrity and inline-suppressions inputs', () => {
     }
   });
 });
+
+describe('base-ref input', () => {
+  beforeEach(() => {
+    vi.spyOn(require('child_process'), 'execSync').mockImplementation(() => '');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const findAiGuardCall = (calls: Awaited<ReturnType<typeof runEntrypoint>>['calls']) =>
+    calls.find((c) => c.args.includes('ai-guard'));
+
+  it('passes --base when base-ref is provided for changed-only scans', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'true',
+      INPUT_INSTALL_DEPS: 'false',
+      'INPUT_BASE-REF': 'main',
+      INPUT_BASE_REF: 'main',
+    });
+
+    const args = findAiGuardCall(calls)!.args;
+    expect(args).toContain('changed');
+    const idx = args.indexOf('--base');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('main');
+    // Should NOT use --pr when base-ref is explicitly set
+    expect(args).not.toContain('--pr');
+  });
+
+  it('falls back to --pr when base-ref is not set but GITHUB_BASE_REF is present', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'true',
+      INPUT_INSTALL_DEPS: 'false',
+      GITHUB_BASE_REF: 'main',
+    });
+
+    const args = findAiGuardCall(calls)!.args;
+    expect(args).toContain('--pr');
+    expect(args).not.toContain('--base');
+  });
+
+  it('no --base or --pr when neither base-ref nor GITHUB_BASE_REF is set', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'true',
+      INPUT_INSTALL_DEPS: 'false',
+    });
+
+    const args = findAiGuardCall(calls)!.args;
+    expect(args).not.toContain('--base');
+    expect(args).not.toContain('--pr');
+  });
+
+  it('base-ref takes priority over GITHUB_BASE_REF', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'true',
+      INPUT_INSTALL_DEPS: 'false',
+      'INPUT_BASE-REF': 'develop',
+      INPUT_BASE_REF: 'develop',
+      GITHUB_BASE_REF: 'main',
+    });
+
+    const args = findAiGuardCall(calls)!.args;
+    const idx = args.indexOf('--base');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('develop');
+    expect(args).not.toContain('--pr');
+  });
+
+  it('rejects invalid base-ref with shell injection characters', async () => {
+    const exitCode = { value: null as number | null };
+    const originalExit = process.exit;
+    (process as any).exit = (code?: number) => {
+      exitCode.value = code ?? 0;
+    };
+    const savedEnv = { ...process.env };
+    process.env.INPUT_CHANGED_ONLY = 'true';
+    process.env.INPUT_INSTALL_DEPS = 'false';
+    process.env['INPUT_BASE-REF'] = 'main; rm -rf /';
+    process.env.INPUT_BASE_REF = 'main; rm -rf /';
+    try {
+      const entrypointPath = path.resolve(__dirname, '../../action/entrypoint.js');
+      delete require.cache[entrypointPath];
+      await new Promise<void>((resolve) => {
+        require(entrypointPath);
+        setTimeout(resolve, 100);
+      });
+      expect(exitCode.value).toBe(1);
+    } finally {
+      process.env = savedEnv;
+      (process as any).exit = originalExit;
+    }
+  });
+});

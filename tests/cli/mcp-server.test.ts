@@ -479,6 +479,75 @@ describe('untracked file differential scanning', () => {
   });
 });
 
+// ─── REGRESSION: GITHUB_BASE_REF environment isolation ────────────────────────
+
+describe('REGRESSION: getChangedFiles must not read GITHUB_BASE_REF', () => {
+  let tempDir: string;
+
+  beforeAll(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-guard-env-isolation-'));
+    execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tempDir, stdio: 'pipe' });
+    fs.writeFileSync(path.join(tempDir, 'base.js'), 'const x = 1;\n', 'utf-8');
+    execFileSync('git', ['add', '.'], { cwd: tempDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: tempDir, stdio: 'pipe' });
+  });
+
+  afterAll(() => {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('GITHUB_BASE_REF set does NOT activate PR-diff mode without explicit base', () => {
+    const saved = process.env.GITHUB_BASE_REF;
+    process.env.GITHUB_BASE_REF = 'main';
+    try {
+      const untrackedFile = path.join(tempDir, 'env-test.js');
+      fs.writeFileSync(untrackedFile, 'const y = 2;\n', 'utf-8');
+      try {
+        const res = getChangedFiles({ cwd: tempDir });
+        // Must be 'uncommitted' mode, NOT 'pr-diff'
+        expect(res.mode).toBe('uncommitted');
+        expect(res.debugInfo.resolvedBase).toBeUndefined();
+        // The untracked file should be detected
+        expect(res.files).toHaveLength(1);
+        expect(res.files[0]).toContain('env-test.js');
+      } finally {
+        fs.unlinkSync(untrackedFile);
+      }
+    } finally {
+      if (saved !== undefined) process.env.GITHUB_BASE_REF = saved;
+      else delete process.env.GITHUB_BASE_REF;
+    }
+  });
+
+  it('GITHUB_BASE_REF unset uses uncommitted mode', () => {
+    const saved = process.env.GITHUB_BASE_REF;
+    delete process.env.GITHUB_BASE_REF;
+    try {
+      const res = getChangedFiles({ cwd: tempDir });
+      expect(res.mode).toBe('uncommitted');
+      expect(res.debugInfo.resolvedBase).toBeUndefined();
+    } finally {
+      if (saved !== undefined) process.env.GITHUB_BASE_REF = saved;
+    }
+  });
+
+  it('explicit base option triggers PR-diff mode regardless of GITHUB_BASE_REF', () => {
+    const saved = process.env.GITHUB_BASE_REF;
+    process.env.GITHUB_BASE_REF = 'develop';
+    try {
+      // Use a base that exists in this repo (HEAD works as a ref)
+      const res = getChangedFiles({ cwd: tempDir, base: 'HEAD' });
+      expect(res.mode).toBe('pr-diff');
+      expect(res.debugInfo.resolvedBase).toBe('HEAD');
+    } finally {
+      if (saved !== undefined) process.env.GITHUB_BASE_REF = saved;
+      else delete process.env.GITHUB_BASE_REF;
+    }
+  });
+});
+
 // ─── MCP Server startup test ──────────────────────────────────────────────────
 
 describe('MCP server', () => {

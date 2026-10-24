@@ -74,6 +74,11 @@ inputs:
     default: ''
     required: false
 
+  base-ref:
+    description: 'Explicit base branch or ref for changed-file detection and integrity analysis (e.g. "main"). If omitted, the PR base ref (GITHUB_BASE_REF) is used automatically on pull_request events. Use this on push events or when GITHUB_BASE_REF is not available. Requires eslint-plugin-ai-guard >= 1.4.3.'
+    default: ''
+    required: false
+
 # ─── Outputs ──────────────────────────────────────────────────────────────────
 
 outputs:

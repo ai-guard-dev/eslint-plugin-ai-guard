@@ -90,18 +90,21 @@ describe('REGRESSION: double origin/ prefix bug (Phase 2A Bug 2)', () => {
     expect(result.mode).toBe('fallback');
   });
 
-  it('getChangedFiles handles GITHUB_BASE_REF without double-prefixing', () => {
+  it('getChangedFiles ignores GITHUB_BASE_REF — env must not leak into PR-diff mode', () => {
     const savedRef = process.env.GITHUB_BASE_REF;
     process.env.GITHUB_BASE_REF = 'main';
 
-    const result = getChangedFiles({ cwd: '/nonexistent/xyz' });
-    // No git — fallback, but env is read correctly
-    expect(result.mode).toBe('fallback');
-
-    if (savedRef !== undefined) {
-      process.env.GITHUB_BASE_REF = savedRef;
-    } else {
-      delete process.env.GITHUB_BASE_REF;
+    try {
+      const result = getChangedFiles({ cwd: '/nonexistent/xyz' });
+      // Without explicit `base`, should NOT attempt PR-diff even when env is set
+      expect(result.mode).toBe('fallback');
+      expect(result.debugInfo.resolvedBase).toBeUndefined();
+    } finally {
+      if (savedRef !== undefined) {
+        process.env.GITHUB_BASE_REF = savedRef;
+      } else {
+        delete process.env.GITHUB_BASE_REF;
+      }
     }
   });
 });
@@ -109,36 +112,40 @@ describe('REGRESSION: double origin/ prefix bug (Phase 2A Bug 2)', () => {
 // ─── Bug regression: operator precedence ─────────────────────────────────────
 
 describe('REGRESSION: operator precedence bug (Phase 2A Bug 1)', () => {
-  it('GITHUB_BASE_REF env is correctly resolved without base option', () => {
+  it('GITHUB_BASE_REF env is ignored — only explicit base triggers PR-diff', () => {
     const savedRef = process.env.GITHUB_BASE_REF;
     process.env.GITHUB_BASE_REF = 'develop';
 
-    const result = getChangedFiles({ cwd: MOCK_CWD });
-    // If in pr-diff mode (base resolved), that's correct
-    // If fallback (git not available), that's also fine
-    expect(['pr-diff', 'uncommitted', 'fallback']).toContain(result.mode);
-
-    if (savedRef !== undefined) {
-      process.env.GITHUB_BASE_REF = savedRef;
-    } else {
-      delete process.env.GITHUB_BASE_REF;
+    try {
+      const result = getChangedFiles({ cwd: MOCK_CWD });
+      // Without explicit `base`, env must not activate PR-diff mode
+      expect(result.mode).not.toBe('pr-diff');
+      expect(result.debugInfo.resolvedBase).toBeUndefined();
+    } finally {
+      if (savedRef !== undefined) {
+        process.env.GITHUB_BASE_REF = savedRef;
+      } else {
+        delete process.env.GITHUB_BASE_REF;
+      }
     }
   });
 
-  it('explicit base option takes priority over GITHUB_BASE_REF', () => {
+  it('explicit base option works regardless of GITHUB_BASE_REF', () => {
     const savedRef = process.env.GITHUB_BASE_REF;
     process.env.GITHUB_BASE_REF = 'main';
 
-    const result = getChangedFiles({ cwd: MOCK_CWD, base: 'develop' });
-    // resolvedBase should be 'develop', not 'main'
-    if (result.debugInfo.resolvedBase) {
-      expect(result.debugInfo.resolvedBase).toBe('develop');
-    }
-
-    if (savedRef !== undefined) {
-      process.env.GITHUB_BASE_REF = savedRef;
-    } else {
-      delete process.env.GITHUB_BASE_REF;
+    try {
+      const result = getChangedFiles({ cwd: MOCK_CWD, base: 'develop' });
+      // resolvedBase should be 'develop' from the explicit option
+      if (result.debugInfo.resolvedBase) {
+        expect(result.debugInfo.resolvedBase).toBe('develop');
+      }
+    } finally {
+      if (savedRef !== undefined) {
+        process.env.GITHUB_BASE_REF = savedRef;
+      } else {
+        delete process.env.GITHUB_BASE_REF;
+      }
     }
   });
 });
@@ -213,20 +220,22 @@ describe('Staged mode', () => {
     expect(['staged', 'fallback']).toContain(result.mode);
   });
 
-  it('staged mode ignores GITHUB_BASE_REF', () => {
+  it('staged mode ignores GITHUB_BASE_REF — env does not leak into mode selection', () => {
     const savedRef = process.env.GITHUB_BASE_REF;
     process.env.GITHUB_BASE_REF = 'main';
 
-    const result = getChangedFiles({ cwd: MOCK_CWD, staged: true });
-    // staged: true should override base ref detection
-    expect(['staged', 'fallback']).toContain(result.mode);
-    // Should NOT be pr-diff mode
-    expect(result.mode).not.toBe('pr-diff');
-
-    if (savedRef !== undefined) {
-      process.env.GITHUB_BASE_REF = savedRef;
-    } else {
-      delete process.env.GITHUB_BASE_REF;
+    try {
+      const result = getChangedFiles({ cwd: MOCK_CWD, staged: true });
+      // staged: true means staged mode regardless of env
+      expect(['staged', 'fallback']).toContain(result.mode);
+      // Should NOT be pr-diff mode
+      expect(result.mode).not.toBe('pr-diff');
+    } finally {
+      if (savedRef !== undefined) {
+        process.env.GITHUB_BASE_REF = savedRef;
+      } else {
+        delete process.env.GITHUB_BASE_REF;
+      }
     }
   });
 });

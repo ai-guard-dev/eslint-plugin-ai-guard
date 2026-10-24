@@ -96,6 +96,7 @@ async function main() {
   const baselineFile    = getInput('baseline', '');
   const integrity       = getInput('integrity', 'off');
   const inlineSuppress  = getInput('inline-suppressions', '');
+  const baseRef         = getInput('base-ref', '');
 
   const cwd = path.resolve(workingDir);
 
@@ -122,7 +123,19 @@ async function main() {
 
   const cliArgs = [command];
 
-  if (changedOnly && process.env.GITHUB_BASE_REF) {
+  // Base-ref resolution for changed-file detection:
+  // 1. Explicit base-ref input takes priority (works on push events)
+  // 2. GITHUB_BASE_REF is used via --pr on pull_request events
+  // 3. Neither → scans uncommitted changes
+  if (changedOnly && baseRef) {
+    // Validate: must be a safe Git ref (no shell injection, no options)
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/~^-]*$/.test(baseRef) || baseRef.includes('..')) {
+      error(`Invalid base-ref '${baseRef}'. Expected a branch name like 'main' or 'develop'.`);
+      process.exit(1);
+      return;
+    }
+    cliArgs.push('--base', baseRef);
+  } else if (changedOnly && process.env.GITHUB_BASE_REF) {
     cliArgs.push('--pr');
   }
 
