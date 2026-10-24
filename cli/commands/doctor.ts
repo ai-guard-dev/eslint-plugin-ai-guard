@@ -278,15 +278,12 @@ export function registerDoctorCommand(program: Command): void {
       // ── Check 11: @typescript-eslint/parser for TS projects ───────────────
       {
         let parserOk = false;
-        let parserVersion: string | null = null;
         try {
           const { createRequire } = await import('module');
           const req = createRequire(path.join(cwd, 'package.json'));
           const pkgPath = req.resolve('@typescript-eslint/parser/package.json');
-          const pkg = JSON.parse(
-            (await import('fs')).readFileSync(pkgPath, 'utf-8'),
-          ) as { version?: string };
-          parserVersion = pkg.version ?? null;
+          // Resolving and reading package.json proves the parser is installed.
+          JSON.parse((await import('fs')).readFileSync(pkgPath, 'utf-8'));
           parserOk = true;
         } catch {
           // Optional — only needed for TS projects

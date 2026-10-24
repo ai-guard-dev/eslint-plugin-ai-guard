@@ -2,8 +2,8 @@ import type { Command } from 'commander';
 import fs from 'fs';
 import ora from 'ora';
 import chalk from 'chalk';
-import { runEslint, type Preset, type EcosystemIssue } from '../utils/eslint-runner.js';
-import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, CONFIDENCE_TIER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
+import { runEslint, isInlineSuppressionMode, type Preset, type EcosystemIssue, type InlineSuppressionMode } from '../utils/eslint-runner.js';
+import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, CONFIDENCE_TIER, type ConfidenceTier } from '../utils/logger.js';
 import { buildSarifLog, sarifToJson, buildSarifDebugInfo } from '../utils/sarif.js';
 import { emitGitHubAnnotations, writeGitHubSummary, writeGitHubOutputs } from '../utils/github-summary.js';
 import { isGitHubActions } from '../utils/git-diff.js';
@@ -32,7 +32,9 @@ export function registerRunCommand(program: Command): void {
     .option('--debug-sarif-paths', 'Print path normalization trace — diagnose GitHub Code Scanning path resolution')
     .option('--debug-sarif-persistence', 'Print persistence identity trace — fingerprints, automationDetails, category')
     .option('--sarif-output <file>', 'Write SARIF to this file instead of stdout')
+    .option('--inline-suppressions <mode>', 'Inline eslint-disable directives covering AI Guard findings: allow (default) | require-reason | ignore')
     .action(async (opts: {
+      inlineSuppressions?: string;
       path: string;
       preset?: string;
       strict?: boolean;
@@ -55,6 +57,14 @@ export function registerRunCommand(program: Command): void {
       ) {
         log.blank();
         log.error('--max-warnings must be a non-negative integer.');
+        log.blank();
+        process.exit(1);
+        return;
+      }
+
+      if (opts.inlineSuppressions !== undefined && !isInlineSuppressionMode(opts.inlineSuppressions)) {
+        log.blank();
+        log.error(`Unknown --inline-suppressions '${opts.inlineSuppressions}'. Valid modes: allow, require-reason, ignore`);
         log.blank();
         process.exit(1);
         return;
@@ -100,6 +110,7 @@ export function registerRunCommand(program: Command): void {
           preset,
           targetPath: opts.path,
           debugTiming: opts.debugTiming,
+          inlineSuppressions: opts.inlineSuppressions as InlineSuppressionMode | undefined,
         });
         spinner?.stop();
       } catch (err: unknown) {
@@ -258,6 +269,8 @@ export function registerRunCommand(program: Command): void {
           ignoredFiles: result.ignoredFiles,
           scanRan: !scanDidNotRun(result),
           tsParserAvailable: result.tsParserAvailable,
+          inlineSuppressions: result.inlineSuppressions,
+          suppressedIssues: result.suppressedIssues ?? [],
         };
         console.log(JSON.stringify(jsonOutput, null, 2));
         process.exit(scanDidNotRun(result) ? SCAN_NOT_RUN_EXIT_CODE : resolveExitCode(result, opts.failOn ?? 'errors', opts.maxWarnings));
@@ -484,6 +497,8 @@ export function registerRunCommand(program: Command): void {
         log.blank();
       }
 
+      renderSuppressedIssues(result);
+
       log.divider();
       log.blank();
 
@@ -576,7 +591,7 @@ function hasGroupedWarnings(result: RunResult): boolean {
   return false;
 }
 
-export function renderIssuesByFile(result: RunResult, verbose: boolean, quiet = false): void {
+export function renderIssuesByFile(result: RunResult, verbose: boolean, _quiet = false): void {
   for (const file of result.files) {
     log.print(
       `  ${chalk.bold.white(file.filePath)} ` +
@@ -649,6 +664,25 @@ export const SCAN_NOT_RUN_EXIT_CODE = 2;
  */
 export function scanDidNotRun(result: RunResult): boolean {
   return result.filesScanned === 0 && result.ignoredFiles.length > 0;
+}
+
+/**
+ * List AI Guard findings hidden by inline directives (they never count toward
+ * totals or exit codes, but are never silently dropped either).
+ */
+export function renderSuppressedIssues(result: RunResult): void {
+  const suppressed = result.suppressedIssues ?? [];
+  if (suppressed.length === 0) return;
+  log.section(`Hidden by inline directives (${suppressed.length})`);
+  log.print(chalk.dim('  These AI Guard findings are suppressed by eslint-disable comments in the code.'));
+  log.print(chalk.dim('  Use --inline-suppressions require-reason or ignore to make them count.'));
+  log.blank();
+  for (const s of suppressed.slice(0, 20)) {
+    const reason = s.directive.justification ? chalk.gray(` — reason: ${s.directive.justification}`) : chalk.yellow(' — no reason given');
+    log.print(`  ${chalk.white(`${s.filePath.replace(/\\/g, '/')}:${s.issue.line}`)}  ${chalk.cyan(s.issue.ruleId.replace('ai-guard/', ''))}  ${chalk.gray(s.directive.text)}${reason}`);
+  }
+  if (suppressed.length > 20) log.print(chalk.gray(`  …and ${suppressed.length - 20} more (see --json)`));
+  log.blank();
 }
 
 export function getRunExitCode(result: RunResult, maxWarnings?: number): number {

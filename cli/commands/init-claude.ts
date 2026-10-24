@@ -12,22 +12,38 @@ interface ClaudeHookEntry {
 }
 
 interface ClaudeHookMatcher {
-  matcher: string;
+  /** Omitted for events without matcher support (Stop, SessionStart). */
+  matcher?: string;
   hooks: ClaudeHookEntry[];
 }
+
+type HookEvent = 'PostToolUse' | 'Stop' | 'SessionStart' | 'PreToolUse';
 
 interface ClaudeSettings {
   hooks?: {
     PostToolUse?: ClaudeHookMatcher[];
+    Stop?: ClaudeHookMatcher[];
+    SessionStart?: ClaudeHookMatcher[];
+    PreToolUse?: ClaudeHookMatcher[];
     [key: string]: unknown;
   };
   [key: string]: unknown;
 }
 
+export interface MergeOptions {
+  /** Register the Stop (final integrity check) and SessionStart (base snapshot) hooks. Default true. */
+  stopHook?: boolean;
+  /** Register the PreToolUse Bash guard against `--no-verify` / `HUSKY=0`. Default true. */
+  bashGuard?: boolean;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const AI_GUARD_HOOK_COMMAND = 'node_modules/.bin/ai-guard claude-hook';
-const AI_GUARD_HOOK_MATCHER = 'Edit|Write';
+const AI_GUARD_HOOK_MATCHER = 'Edit|MultiEdit|Write';
+/** Matcher written by AI Guard ≤ 1.4.1; still recognized when merging. */
+const LEGACY_HOOK_MATCHER = 'Edit|Write';
+const BASH_MATCHER = 'Bash';
 const SETTINGS_DIR = '.claude';
 const SETTINGS_FILE = 'settings.json';
 const SETTINGS_LOCAL_FILE = 'settings.local.json';
@@ -92,61 +108,52 @@ export function writeClaudeSettings(
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 }
 
+function addHook(
+  hooks: NonNullable<ClaudeSettings['hooks']>,
+  event: HookEvent,
+  matcher: string | undefined,
+  alsoAccept: string[] = [],
+): boolean {
+  const list = Array.isArray(hooks[event]) ? hooks[event] as ClaudeHookMatcher[] : [];
+  hooks[event] = list;
+  // Already installed under any matcher: leave the user's configuration alone.
+  if (list.some(matcherHasAiGuard)) return false;
+  const entry: ClaudeHookEntry = { type: 'command', command: AI_GUARD_HOOK_COMMAND };
+  const target = list.find((m) => (matcher === undefined ? m.matcher === undefined : m.matcher === matcher || alsoAccept.includes(m.matcher ?? '')));
+  if (target) {
+    if (!Array.isArray(target.hooks)) target.hooks = [];
+    target.hooks.push(entry);
+  } else {
+    list.push(matcher === undefined ? { hooks: [entry] } : { matcher, hooks: [entry] });
+  }
+  return true;
+}
+
 /**
- * Merge the AI Guard PostToolUse hook into existing settings.
- * Returns { settings, changed } where changed indicates if modification was needed.
+ * Merge the AI Guard hooks into existing settings:
+ *  - PostToolUse (Edit|MultiEdit|Write): lint + per-file integrity feedback
+ *  - SessionStart + Stop: integrity base snapshot and final check
+ *  - PreToolUse (Bash): confirm commands that skip Git hooks
+ * Returns { settings, changed, added } where `added` lists the events added.
  */
 export function mergeAiGuardHook(
   settings: ClaudeSettings,
-): { settings: ClaudeSettings; changed: boolean } {
+  options: MergeOptions = {},
+): { settings: ClaudeSettings; changed: boolean; added: HookEvent[] } {
   // Deep-clone to avoid mutation
   const result: ClaudeSettings = JSON.parse(JSON.stringify(settings));
-
-  // Ensure hooks object exists
   if (!result.hooks || typeof result.hooks !== 'object') {
     result.hooks = {};
   }
-
-  // Ensure PostToolUse array exists
-  if (!Array.isArray(result.hooks.PostToolUse)) {
-    result.hooks.PostToolUse = [];
+  const hooks = result.hooks;
+  const added: HookEvent[] = [];
+  if (addHook(hooks, 'PostToolUse', AI_GUARD_HOOK_MATCHER, [LEGACY_HOOK_MATCHER])) added.push('PostToolUse');
+  if (options.stopHook !== false) {
+    if (addHook(hooks, 'SessionStart', undefined)) added.push('SessionStart');
+    if (addHook(hooks, 'Stop', undefined)) added.push('Stop');
   }
-
-  // Check if an Edit|Write matcher with our hook already exists
-  const existingMatcher = result.hooks.PostToolUse.find(
-    (m) => m.matcher === AI_GUARD_HOOK_MATCHER && matcherHasAiGuard(m),
-  );
-
-  if (existingMatcher) {
-    // Already configured — no changes needed
-    return { settings: result, changed: false };
-  }
-
-  // Check if there's an Edit|Write matcher WITHOUT our hook
-  const editWriteMatcher = result.hooks.PostToolUse.find(
-    (m) => m.matcher === AI_GUARD_HOOK_MATCHER,
-  );
-
-  const aiGuardHook: ClaudeHookEntry = {
-    type: 'command',
-    command: AI_GUARD_HOOK_COMMAND,
-  };
-
-  if (editWriteMatcher) {
-    // Append our hook to the existing matcher's hooks array
-    if (!Array.isArray(editWriteMatcher.hooks)) {
-      editWriteMatcher.hooks = [];
-    }
-    editWriteMatcher.hooks.push(aiGuardHook);
-  } else {
-    // Create a new matcher entry
-    result.hooks.PostToolUse.push({
-      matcher: AI_GUARD_HOOK_MATCHER,
-      hooks: [aiGuardHook],
-    });
-  }
-
-  return { settings: result, changed: true };
+  if (options.bashGuard !== false && addHook(hooks, 'PreToolUse', BASH_MATCHER)) added.push('PreToolUse');
+  return { settings: result, changed: added.length > 0, added };
 }
 
 // ─── Command registration ─────────────────────────────────────────────────────
@@ -154,10 +161,12 @@ export function mergeAiGuardHook(
 export function registerInitClaudeCommand(program: Command): void {
   program
     .command('init-claude')
-    .description('Configure Claude Code PostToolUse hook for AI Guard validation')
+    .description('Configure Claude Code hooks for AI Guard (edit feedback, final check-integrity gate, Git-hook bypass guard)')
     .option('--dry-run', 'Preview what would change without writing any files')
     .option('--local', 'Write to .claude/settings.local.json instead of settings.json')
-    .action((opts: { dryRun?: boolean; local?: boolean }) => {
+    .option('--no-stop-hook', 'Do not register the SessionStart/Stop check-integrity hooks')
+    .option('--no-bash-guard', 'Do not register the PreToolUse guard for `git commit --no-verify` / `HUSKY=0`')
+    .action((opts: { dryRun?: boolean; local?: boolean; stopHook?: boolean; bashGuard?: boolean }) => {
       const cwd = process.cwd();
       const isDryRun = opts.dryRun === true;
       const useLocal = opts.local === true;
@@ -220,10 +229,13 @@ export function registerInitClaudeCommand(program: Command): void {
 
       // ── Step 3: Merge hook ──────────────────────────────────────────────────
 
-      const { settings: merged, changed } = mergeAiGuardHook(existingSettings);
+      const { settings: merged, changed, added } = mergeAiGuardHook(existingSettings, {
+        stopHook: opts.stopHook !== false,
+        bashGuard: opts.bashGuard !== false,
+      });
 
       if (!changed) {
-        log.success('AI Guard PostToolUse hook is already configured');
+        log.success('AI Guard hooks are already configured');
         log.blank();
         log.print(`  ${chalk.gray('No changes needed. The hook is already present in')} ${chalk.white(relPath)}`);
         log.blank();
@@ -257,13 +269,13 @@ export function registerInitClaudeCommand(program: Command): void {
 
       log.section('Setup Complete');
       log.blank();
-      log.print(`  ${chalk.green('✔')}  ${chalk.bold('Hook type:')} ${chalk.cyan('PostToolUse')}`);
-      log.print(`  ${chalk.green('✔')}  ${chalk.bold('Matcher:')} ${chalk.cyan(AI_GUARD_HOOK_MATCHER)}`);
+      log.print(`  ${chalk.green('✔')}  ${chalk.bold('Hooks added:')} ${chalk.cyan(added.join(', '))}`);
       log.print(`  ${chalk.green('✔')}  ${chalk.bold('Command:')} ${chalk.cyan(AI_GUARD_HOOK_COMMAND)}`);
       log.print(`  ${chalk.green('✔')}  ${chalk.bold('Settings:')} ${chalk.cyan(relPath)}`);
       log.blank();
-      log.info('When Claude Code edits a JS/TS file, AI Guard will automatically');
-      log.info('scan it for hardcoded secrets, unsafe eval, empty catches, and SQL injection.');
+      log.info('PostToolUse: after Claude edits a file, findings and weakened checks are sent back to Claude.');
+      if (opts.stopHook !== false) log.info('Stop: before Claude finishes, newly weakened checks (skips, suppressions, config downgrades) block once.');
+      if (opts.bashGuard !== false) log.info('PreToolUse: commands that skip Git hooks (--no-verify, HUSKY=0) ask for confirmation.');
       log.blank();
       log.print(`  ${chalk.gray('Rules enabled (agent preset):')}`);
       log.print(`    ${chalk.yellow('•')} no-hardcoded-secret  ${chalk.gray('(high confidence)')}`);

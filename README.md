@@ -37,7 +37,8 @@
 - **ESLint plugin** with 18 deterministic rules and 4 presets (`recommended`, `strict`, `security`, `agent`)
 - **CLI** (`ai-guard`) for terminal, changed-file, and CI scanning
 - **GitHub Action** with native SARIF 2.1.0 output for GitHub Code Scanning
-- **Claude Code integration** with a zero-config PostToolUse hook
+- **Check integrity** (`ai-guard integrity`) — detects changes that weaken checks: new suppressions, skipped or removed tests, lowered ESLint/TypeScript/coverage settings, removed CI steps
+- **Claude Code integration** with hooks that send findings back to Claude and block finishing once when checks were weakened
 - **MCP server** (`ai-guard-mcp`) for local AI-agent workflows over STDIO
 
 It is engineered to detect reliability bugs, async hazards, security vulnerabilities, and code-scaffolding defects frequently introduced during AI-assisted development (GitHub Copilot, Cursor, Claude Code, Gemini Code Assist, etc.).
@@ -262,8 +263,9 @@ npx ai-guard <command> [options]
 
 | Command | Purpose | Common Options |
 | :--- | :--- | :--- |
-| `run` | Scan your workspace using AI Guard AST rules | `--path <dir>`, `--strict`, `--security`, `--json`, `--sarif`, `--fail-on <level>`, `--max-warnings <n>` |
-| `changed` | Fast CI scan — only scans modified files in git | `--pr`, `--staged`, `--base <branch>`, `--strict`, `--sarif`, `--sarif-output <file>`, `--fail-on <level>` |
+| `run` | Scan your workspace using AI Guard AST rules | `--path <dir>`, `--strict`, `--security`, `--json`, `--sarif`, `--fail-on <level>`, `--max-warnings <n>`, `--inline-suppressions <mode>` |
+| `changed` | Fast CI scan — only scans modified files in git | `--pr`, `--staged`, `--base <branch>`, `--baseline [file]`, `--integrity <off\|report\|enforce>`, `--inline-suppressions <mode>`, `--strict`, `--sarif`, `--sarif-output <file>`, `--fail-on <level>` |
+| `integrity` | Detect changes that weaken checks vs a base revision ([docs](./docs/integrity.md)) | `--base <ref>`, `--pr`, `--staged`, `--enforce`, `--json`, `--sarif`, `--accept <fingerprints\|all>` |
 | `init` | Automatically detect environment & configure ESLint | `--preset <name>`, `--flat`, `--dry-run`, `-y, --yes` |
 | `init-context` | Generate prompt instruction files for AI coding agents | `-a, --all`, `--force`, `--dry-run`, `--rules <categories>` |
 | `doctor` | Diagnose your ESLint, parser, and plugin environment | (No options needed — prints actionable diagnostic report) |
@@ -295,7 +297,22 @@ npx ai-guard report --output ai-guard-report.html
 # 6. Save existing issues as baseline and only fail on new regressions
 npx ai-guard baseline --save
 npx ai-guard baseline --check
+
+# 7. Fail a PR that skips tests, adds eslint-disable, or lowers coverage thresholds
+npx ai-guard changed --pr --integrity enforce
 ```
+
+### Inline suppressions never hide findings silently
+
+AI Guard reads `eslint-disable` directives itself; ESLint's own inline config is disabled in AI Guard's private ESLint instance, so a comment cannot make a finding vanish without a trace. `--inline-suppressions` selects the policy:
+
+| Mode | Effect |
+|---|---|
+| `allow` (default) | A covering directive hides the finding from totals and exit codes; it is listed under "Hidden by inline directives" (JSON `suppressedIssues`, step summary, SARIF `suppressedFindingsCount`) |
+| `require-reason` | Only directives with a ` -- reason` hide findings (used by the Claude Code hook) |
+| `ignore` | Directives never hide AI Guard findings (always used by the MCP server) |
+
+This applies to `ai-guard run`, `changed`, the GitHub Action, the Claude Code hook and MCP. It does not change how your own `eslint .` treats directives. TypeScript comments (`@ts-ignore`, `@ts-nocheck`) never affect AI Guard findings; `ai-guard integrity` reports newly added ones.
 
 ---
 
@@ -332,14 +349,16 @@ This dual-layer defense minimizes review friction and ensures generated code mee
 
 ## Claude Code Integration
 
-AI Guard integrates directly with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as a **PostToolUse validation hook**. Every time Claude Code edits or writes a JS/TS file, AI Guard automatically scans it for common issues.
+AI Guard integrates directly with [Claude Code](https://code.claude.com/docs/en/hooks) through hooks:
 
 ```bash
 # One-command setup
 npx ai-guard init-claude
 ```
 
-This configures a PostToolUse hook in `.claude/settings.json` that runs AI Guard's fast `agent` preset (5 high-confidence rules, ~50-200ms per file) after every file edit. Claude Code reads the diagnostics and can fix issues automatically.
+- **PostToolUse** — after each edit, findings from the `agent` preset and newly weakened checks in the edited file are sent back to Claude (`decision: "block"` + `reason`, per the hooks protocol). Earlier versions printed plain stdout, which Claude Code does not show to Claude.
+- **SessionStart + Stop** — before Claude finishes, [check integrity](./docs/integrity.md) runs on everything changed in the session. High-confidence weakenings (a new `.skip`, `eslint-disable`, lowered threshold…) block stopping once per finding set; advisories are shown to you, never block.
+- **PreToolUse (Bash)** — `git commit --no-verify` / `HUSKY=0` ask for confirmation.
 
 ```bash
 # Preview before applying
@@ -414,6 +433,9 @@ jobs:
 | `package-manager` | Package manager: `auto` \| `npm` \| `pnpm` \| `yarn` | `'auto'` |
 | `sarif-output` | Output filepath for generated SARIF report | `'ai-guard-results.sarif'` |
 | `install-deps` | Install project dependencies prior to scanning | `'true'` |
+| `baseline` | Committed baseline file; with `changed-only`, report only findings not in it | `''` |
+| `integrity` | Check integrity: `off` \| `report` \| `enforce` (needs `changed-only` and `fetch-depth: 0`) | `'off'` |
+| `inline-suppressions` | `allow` \| `require-reason` \| `ignore` for eslint-disable directives covering AI Guard findings | `''` (allow) |
 
 ### Action Outputs
 
@@ -423,6 +445,8 @@ jobs:
 | `high-confidence-count` | Number of high-confidence issues flagged |
 | `medium-confidence-count` | Number of medium-confidence issues flagged |
 | `files-scanned` | Count of files analyzed during the execution |
+| `integrity-high-count` | High-confidence check-integrity findings (when `integrity` is enabled) |
+| `integrity-advisory-count` | Advisory check-integrity findings (when `integrity` is enabled) |
 | `sarif-file` | Absolute path to the generated SARIF 2.1.0 artifact |
 | `duration-ms` | Total scan execution duration in milliseconds |
 
@@ -639,6 +663,7 @@ npx --yes --package eslint-plugin-ai-guard ai-guard-mcp
 | `ai_guard_scan_diff` | Scan changed files in git diff (including newly created untracked JS/TS files) |
 | `ai_guard_scan_project` | Scan a bounded workspace directory (current source; not yet published) |
 | `ai_guard_rules` | List rules and presets, or look up specific rules (`rules: ["no-floating-promise"]`) with remediation and docs link |
+| `ai_guard_check_integrity` | Report checks weakened by current Git changes (new suppressions, skipped/removed tests, lowered configs, removed CI steps), with `tier` and `hasBlockingFindings` |
 
 All tools declare an `outputSchema`; the text content is the same result as compact JSON. Scan tools accept `maxIssues` (default 50, errors first, exact `totalIssues` and `truncated`). The `verify_changes` prompt runs the scan → fix → rescan loop.
 

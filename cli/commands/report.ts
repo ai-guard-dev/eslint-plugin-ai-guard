@@ -217,8 +217,6 @@ export function buildReportData(
 // ─── HTML Template ────────────────────────────────────────────────────────────
 
 export function generateHtml(data: ReportData): string {
-  const scoreColor = data.score >= 80 ? '#10b981' : data.score >= 50 ? '#f59e0b' : '#ef4444';
-  const scoreLabel = data.score >= 80 ? 'Great' : data.score >= 50 ? 'Needs Work' : 'Critical';
   const formattedDate = new Date(data.generatedAt).toLocaleString();
 
   const topFilesRows = data.topFiles.length === 0

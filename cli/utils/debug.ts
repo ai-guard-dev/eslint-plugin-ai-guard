@@ -6,7 +6,7 @@
  */
 
 import chalk from 'chalk';
-import type { GitDiffDebugInfo, ChangedFilesResult } from './git-diff.js';
+import type { ChangedFilesResult } from './git-diff.js';
 
 // ─── Debug output ─────────────────────────────────────────────────────────────
 

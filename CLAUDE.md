@@ -168,12 +168,14 @@ router.get('/admin/users', requireAuth, getUsers);
 
 ## Suppression Convention
 
-When a rule must be bypassed intentionally, add a suppression comment with reason:
+When a rule must be bypassed intentionally, add an ESLint directive for that one rule and line, with a reason after ` -- `:
 
 ```typescript
-// ai-guard-disable no-floating-promise -- intentional fire-and-forget, tracked by Sentry
-void sendAnalyticsEvent(data);
+// eslint-disable-next-line ai-guard/no-floating-promise -- intentional fire-and-forget, tracked by Sentry
+sendAnalyticsEvent(data);
 ```
+
+Directives without a reason are reported by `ai-guard run`/`changed` and do not hide findings in the Claude Code hook or MCP. Never skip, focus or delete tests, add blanket `eslint-disable`/`@ts-ignore`, lower coverage or TypeScript strictness, or remove CI steps to make checks pass — `ai-guard integrity` reports those changes.
 
 ---
 

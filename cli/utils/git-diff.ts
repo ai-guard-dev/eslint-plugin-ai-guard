@@ -2,10 +2,16 @@
  * git-diff.ts — Production-grade changed-file detection for PR/staged scanning.
  *
  * Priority order for changed-file detection:
- *  1. GITHUB_BASE_REF / --base set → multi-strategy PR diff (see tryPrDiff)
+ *  1. --base set (explicit) → multi-strategy PR diff (see tryPrDiff)
  *  2. --staged → git diff --cached
  *  3. Default → uncommitted changes (staged + unstaged vs HEAD)
  *  4. Fallback → git unavailable or no changes (caller falls back to full scan)
+ *
+ * NOTE: This module does NOT read GITHUB_BASE_REF or any CI environment variable.
+ * All CI base-ref resolution is handled by the CLI command layer (changed.ts),
+ * which calls getGitHubBaseRef() and passes the result as the explicit `base`
+ * option.  A low-level git helper must not unexpectedly choose the current
+ * workflow's base branch when the caller did not request it.
  *
  * === BUG HISTORY ===
  * Phase 2A had two stacked bugs that caused PR diff to silently return 0 files:
@@ -175,29 +181,6 @@ function isShallowClone(cwd: string): boolean {
 function isDetachedHead(cwd: string): boolean {
   const result = runGit(['symbolic-ref', '--quiet', 'HEAD'], cwd);
   return result === null;
-}
-
-/**
- * Detect the default upstream branch (e.g., "main", "master", "develop").
- * Used when no base branch is specified or detectable.
- */
-function detectDefaultBranch(cwd: string): string | null {
-  // Try origin/HEAD (most reliable)
-  const symbolic = runGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], cwd);
-  if (symbolic) {
-    const match = /refs\/remotes\/origin\/(.+)$/.exec(symbolic);
-    if (match) return match[1];
-  }
-
-  // Try common branch names
-  for (const candidate of ['main', 'master', 'develop', 'development']) {
-    const check = runGit(['rev-parse', '--verify', `origin/${candidate}`], cwd);
-    if (check) return candidate;
-    const checkLocal = runGit(['rev-parse', '--verify', candidate], cwd);
-    if (checkLocal) return candidate;
-  }
-
-  return null;
 }
 
 // ─── Ref normalization ────────────────────────────────────────────────────────
@@ -387,7 +370,7 @@ export function getChangedFiles(
     cwd = process.cwd(),
     extensions = DEFAULT_EXTENSIONS,
     workingDirectory,
-    debug = false,
+    debug: _debug = false,
     includeUntracked,
   } = options;
 
@@ -421,16 +404,13 @@ export function getChangedFiles(
   debugInfo.isDetachedHead = isDetachedHead(cwd);
 
   // ── Resolve base branch ───────────────────────────────────────────────────
-  // FIX: Explicitly separate env-based base from option-based base.
-  // Never concatenate them — that was the source of the double-prefix bug.
-  const envBase = process.env.GITHUB_BASE_REF
-    ? normalizeBranchName(process.env.GITHUB_BASE_REF)
-    : undefined;
-
-  // Option `base` takes priority over env, then env, then auto-detect
+  // Use only the explicit `base` option.  CI environment variables like
+  // GITHUB_BASE_REF are resolved in the CLI command layer (changed.ts) and
+  // passed here as `base`.  Reading them here caused environment leakage
+  // into temporary repositories and MCP workspaces.
   const resolvedBranch: string | undefined = base
     ? normalizeBranchName(base)
-    : envBase;
+    : undefined;
 
   debugInfo.resolvedBase = resolvedBranch;
 

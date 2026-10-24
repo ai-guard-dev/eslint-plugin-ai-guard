@@ -8,9 +8,10 @@
  */
 
 import fs from 'fs';
-import type { RunResult, IssueDetail } from './eslint-runner.js';
+import type { RunResult } from './eslint-runner.js';
 import { CONFIDENCE_TIER, RULE_CATEGORY } from './logger.js';
 import type { ConfidenceTier } from './logger.js';
+import { counts as integrityCounts, emitIntegrityAnnotations, integrityMarkdown } from './integrity/report.js';
 
 // ─── Environment availability ─────────────────────────────────────────────────
 
@@ -61,6 +62,8 @@ export interface SummaryOptions {
   scanMode: 'full' | 'changed' | 'staged';
   changedFilesCount?: number;
   failOn?: string;
+  /** Set when findings were filtered against a baseline (`changed --baseline`). */
+  baselineSuppressed?: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -130,6 +133,28 @@ export function emitGitHubAnnotations(
       stream.write(`::${level} ${parts.join(',')}::${msg}\n`);
     }
   }
+
+  emitIntegrityAnnotations(result.integrity, stream);
+}
+
+/** Sections shared by every summary: suppressed findings and check integrity. */
+function extraSummarySections(result: RunResult): string[] {
+  const lines: string[] = [];
+  const suppressed = result.suppressedIssues ?? [];
+  if (suppressed.length > 0) {
+    lines.push('<details>');
+    lines.push(`<summary>🔕 ${suppressed.length} AI Guard finding${suppressed.length !== 1 ? 's' : ''} hidden by inline directives</summary>`);
+    lines.push('');
+    lines.push('| File | Line | Rule | Directive | Reason |');
+    lines.push('|------|------|------|-----------|--------|');
+    for (const s of suppressed.slice(0, 30)) {
+      lines.push(`| \`${escapeMarkdown(s.filePath.replace(/\\/g, '/'))}\` | ${s.issue.line} | \`${s.issue.ruleId.replace('ai-guard/', '')}\` | \`${escapeMarkdown(s.directive.text)}\` | ${s.directive.justification ? escapeMarkdown(s.directive.justification) : '—'} |`);
+    }
+    lines.push('</details>');
+    lines.push('');
+  }
+  if (result.integrity) lines.push(integrityMarkdown(result.integrity));
+  return lines;
 }
 
 // ─── GitHub step summary ──────────────────────────────────────────────────────
@@ -153,6 +178,9 @@ export function buildGitHubSummaryMarkdown(
     lines.push(`> **Files scanned:** ${result.filesScanned}`);
   }
   lines.push(`> **Duration:** ${result.durationMs}ms`);
+  if (options.baselineSuppressed !== undefined) {
+    lines.push(`> **Baseline:** ${options.baselineSuppressed} existing finding${options.baselineSuppressed !== 1 ? 's' : ''} matched the baseline and ${options.baselineSuppressed !== 1 ? 'are' : 'is'} not shown`);
+  }
   lines.push('');
 
   // Status badge
@@ -161,11 +189,12 @@ export function buildGitHubSummaryMarkdown(
     lines.push('');
     lines.push('All scanned files passed AI Guard reliability checks.');
     lines.push('');
+    lines.push(...extraSummarySections(result));
     return lines.join('\n');
   }
 
   // Signal summary table
-  const { high = 0, medium = 0, low = 0, informational = 0 } = buildSignalCounts(result);
+  const { high = 0, medium = 0, informational = 0 } = buildSignalCounts(result);
 
   if (high > 0) {
     lines.push(`### ⚠️ ${high} high-confidence issue${high !== 1 ? 's' : ''} found`);
@@ -269,8 +298,13 @@ export function buildGitHubSummaryMarkdown(
   if (informational > 0) {
     lines.push('- Run `ai-guard run --verbose` to expand informational hints');
   }
-  lines.push('- Run `ai-guard baseline` to suppress known issues and track only new ones');
+  if (options.baselineSuppressed === undefined) {
+    lines.push('- Run `ai-guard baseline` to suppress known issues and track only new ones');
+  } else {
+    lines.push('- Findings above are new relative to the baseline; run `ai-guard baseline --save` after fixing or accepting them');
+  }
   lines.push('');
+  lines.push(...extraSummarySections(result));
   lines.push('*Powered by [eslint-plugin-ai-guard](https://github.com/ai-guard-dev/eslint-plugin-ai-guard)*');
 
   return lines.join('\n');
@@ -359,6 +393,11 @@ export function writeGitHubOutputs(result: RunResult, sarifPath?: string): void 
     `informational-count=${informational}`,
     `files-scanned=${result.filesScanned}`,
     `duration-ms=${result.durationMs}`,
+    `suppressed-count=${result.suppressedIssues?.length ?? 0}`,
+    ...(result.integrity?.report ? [
+      `integrity-high-count=${integrityCounts(result.integrity.report).high}`,
+      `integrity-advisory-count=${integrityCounts(result.integrity.report).advisory}`,
+    ] : []),
     ...(sarifPath ? [`sarif-file=${sarifPath}`] : []),
   ];
 

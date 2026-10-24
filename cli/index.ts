@@ -12,6 +12,7 @@ import { registerInitContextCommand } from './commands/init-context.js';
 import { registerReportCommand } from './commands/report.js';
 import { registerInitClaudeCommand } from './commands/init-claude.js';
 import { registerClaudeHookCommand } from './commands/claude-hook.js';
+import { registerIntegrityCommand } from './commands/integrity.js';
 import { log } from './utils/logger.js';
 
 // ─── Version resolution ───────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ program
     'Quick start:\n' +
     '  npx ai-guard run          Scan current project\n' +
     '  npx ai-guard changed      Scan only changed files (CI mode)\n' +
+    '  npx ai-guard integrity    Detect weakened checks (skips, suppressions, configs)\n' +
     '  npx ai-guard init         Auto-configure ESLint\n' +
     '  npx ai-guard init-context Generate AI agent rules\n' +
     '  npx ai-guard init-claude  Configure Claude Code hook\n' +
@@ -54,6 +56,7 @@ program
 
 registerRunCommand(program);
 registerChangedCommand(program);
+registerIntegrityCommand(program);
 registerInitCommand(program);
 registerDoctorCommand(program);
 registerPresetCommand(program);

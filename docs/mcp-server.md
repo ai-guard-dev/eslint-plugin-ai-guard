@@ -86,6 +86,33 @@ All scan tools accept `preset`: `agent` (default), `recommended`, `strict`, or `
 | `ai_guard_scan_project` | Establish a baseline of findings or check a bounded directory, including outside Git | `{"path":"src","preset":"security","maxFiles":200}` |
 | `ai_guard_rules` | Inspect available rules, severities, and remediation | `{"preset":"agent"}` |
 | `ai_guard_rules` | Look up the rule behind a finding (description, remediation, docs link) | `{"rules":["no-floating-promise"]}` |
+| `ai_guard_check_integrity` | Before finishing: list checks the change weakened (new suppressions, skipped/removed tests, lowered configs, removed CI steps) | `{}` or `{"base":"origin/main"}` |
+
+### Inline directives
+
+MCP scans never let `eslint-disable` comments hide findings (the `ignore` inline-suppressions mode): results include `"inlineSuppressions": "ignore"`, and a finding covered by a directive carries `inlineDirective: { kind, line, text, justification? }` so the agent can see that its comment did not suppress anything. The CLI reports the same directive information (`suppression` on findings, `suppressedIssues` for hidden ones).
+
+### Check integrity
+
+`ai_guard_check_integrity` uses the same engine and finding model as `ai-guard integrity` ([docs](integrity.md)). Input: `base` (optional ref, compared via merge-base exactly as given — no `origin/` guessing), `staged` (index instead of working tree), `maxFindings` (1–500, default 50). Explicit acceptances in `.ai-guard-baseline.json` at the workspace root are applied; an invalid baseline file fails with `BASELINE_INVALID`. Only changes inside the workspace directory are analyzed, with the packaged parser.
+
+```json
+{
+  "success": true, "status": "complete", "clean": false, "hasBlockingFindings": true,
+  "base": { "ref": "HEAD", "commit": "3f9c…", "head": "working-tree" },
+  "filesAnalyzed": 2, "totalFindings": 1, "highCount": 1, "advisoryCount": 0, "truncated": false, "accepted": 0, "errors": [],
+  "findings": [{
+    "ruleId": "ai-guard/integrity-test-skipped", "tier": "high", "blocking": true, "category": "tests",
+    "file": "src/cart.test.ts", "line": 14,
+    "message": "Skipped the existing test \"cart > applies the discount\"; it no longer runs.",
+    "before": "runs", "after": "skipped",
+    "remediation": "Remove `.skip`/`x` and fix the code or the test so it passes. …",
+    "fingerprint": "9c1e…"
+  }]
+}
+```
+
+`tier: "high"` findings are precise weakenings: when `hasBlockingFindings` is true, fix them or explain them to the user before calling the task done. `tier: "advisory"` findings need judgment and are informational. `clean` is true only for a complete analysis with no findings; parse errors or truncation make the result `partial`.
 
 `ai_guard_rules` returns the rule catalog; selecting a preset additionally returns its enabled `presetRules` IDs. With `rules` (1–25 IDs, `ai-guard/` prefix optional) it returns only those rules, each with `docsUrl`; unknown IDs are listed in `unknownRules` and the call fails.
 

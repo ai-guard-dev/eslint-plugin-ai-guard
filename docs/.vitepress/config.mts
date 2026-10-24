@@ -31,6 +31,7 @@ export default defineConfig({
           { text: 'preset', link: '/cli/preset' },
           { text: 'ignore', link: '/cli/ignore' },
           { text: 'baseline', link: '/cli/baseline' },
+          { text: 'integrity', link: '/integrity' },
         ],
       },
       {

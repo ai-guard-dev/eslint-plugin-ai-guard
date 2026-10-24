@@ -53,7 +53,7 @@ export async function scanFiles(
     }
     if (!files.length) return { success: true, status: 'complete', clean: true, errors: [], filesScanned: 0,
       durationMs: Date.now() - start, issues: [], totalIssues: 0, truncated: false, totalErrors: 0, totalWarnings: 0, preset };
-    const result = await runEslint({ preset, targetPath: workspace, files: [...new Set(safeFiles)], isolated: true });
+    const result = await runEslint({ preset, targetPath: workspace, files: [...new Set(safeFiles)], isolated: true, inlineSuppressions: 'ignore' });
     const errors: ScanResult['errors'] = [
       ...result.parserErrors.map(e => ({ code: 'PARSE_ERROR', message: e.message, file: e.filePath.replace(/\\/g, '/'), line: e.line })),
       ...result.ecosystemIssues.map(e => ({ code: 'ANALYSIS_ERROR', message: e.message, file: e.filePath.replace(/\\/g, '/'), line: e.line })),
@@ -75,7 +75,7 @@ export async function scanFiles(
       clean: errors.length === 0 && result.totalIssues === 0, errors,
       filesScanned: result.filesScanned, durationMs: Date.now() - start,
       issues: issues.slice(0, maxIssues), totalIssues: issues.length, truncated,
-      totalErrors: result.totalErrors, totalWarnings: result.totalWarnings, preset };
+      totalErrors: result.totalErrors, totalWarnings: result.totalWarnings, preset, inlineSuppressions: 'ignore' };
   } catch (error) {
     return { ...failure(preset, 'SCAN_FAILED', error instanceof Error ? error.message : String(error)), durationMs: Date.now() - start };
   }

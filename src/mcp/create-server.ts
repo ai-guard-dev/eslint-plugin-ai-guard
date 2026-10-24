@@ -5,6 +5,7 @@ import { scanFile } from './tools/scan-file.js';
 import { scanDiff } from './tools/scan-diff.js';
 import { scanProject } from './tools/scan-project.js';
 import { getRules } from './tools/rules.js';
+import { checkIntegrity, DEFAULT_MAX_FINDINGS, MAX_FINDINGS_LIMIT } from './tools/check-integrity.js';
 import { DEFAULT_MAX_ISSUES, MAX_ISSUES_LIMIT, failure } from './utils/scan.js';
 
 // ─── Output schemas (structuredContent is validated against these) ───────────
@@ -22,6 +23,9 @@ const issueSchema = z.object({
   category: z.string().optional(),
   remediation: z.string().optional(),
   fixable: z.boolean(),
+  inlineDirective: z.object({
+    kind: z.string(), line: z.number(), text: z.string(), justification: z.string().optional(),
+  }).optional(),
 });
 
 const scanOutput = {
@@ -39,6 +43,37 @@ const scanOutput = {
   totalErrors: z.number(),
   totalWarnings: z.number(),
   preset: z.string(),
+  inlineSuppressions: z.literal('ignore').optional(),
+};
+
+const integrityFindingSchema = z.object({
+  ruleId: z.string(),
+  tier: z.enum(['high', 'advisory']),
+  blocking: z.boolean(),
+  category: z.string(),
+  file: z.string(),
+  line: z.number().optional(),
+  message: z.string(),
+  before: z.string().optional(),
+  after: z.string().optional(),
+  remediation: z.string(),
+  fingerprint: z.string(),
+});
+
+const integrityOutput = {
+  success: z.boolean(),
+  status: z.enum(['complete', 'partial', 'failed']),
+  clean: z.boolean(),
+  hasBlockingFindings: z.boolean(),
+  base: z.object({ ref: z.string(), commit: z.string().nullable(), head: z.enum(['working-tree', 'index']) }).optional(),
+  filesAnalyzed: z.number(),
+  findings: z.array(integrityFindingSchema),
+  totalFindings: z.number(),
+  highCount: z.number(),
+  advisoryCount: z.number(),
+  truncated: z.boolean(),
+  accepted: z.number(),
+  errors: z.array(z.object({ code: z.string(), message: z.string(), file: z.string().optional() })),
 };
 
 const scanDiffOutput = {
@@ -71,8 +106,8 @@ const readOnly = { readOnlyHint: true, openWorldHint: false };
 
 export function createMcpServer(root: string): McpServer {
   const workspace = canonicalWorkspace(root);
-  const server = new McpServer({ name: 'ai-guard', version: '1.4.2' }, {
-    instructions: 'Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, and rules to inspect presets or look up a rule.',
+  const server = new McpServer({ name: 'ai-guard', version: '1.4.3' }, {
+    instructions: 'Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, check_integrity to find checks your change weakened (new suppressions, skipped or removed tests, downgraded configs, removed CI steps), and rules to inspect presets or look up a rule. Inline eslint-disable comments never hide findings here.',
   });
   const preset = z.enum(['recommended', 'strict', 'security', 'agent']);
   const maxIssues = z.number().int().min(1).max(MAX_ISSUES_LIMIT).default(DEFAULT_MAX_ISSUES)
@@ -118,6 +153,16 @@ export function createMcpServer(root: string): McpServer {
     outputSchema: scanOutput,
     annotations: readOnly,
   }, args => invoke(() => scanProject(args, workspace)));
+  server.registerTool('ai_guard_check_integrity', {
+    description: 'Report checks weakened by current Git changes compared with a base: new eslint-disable/@ts-ignore, skipped, focused or removed tests, lowered ESLint/TypeScript/coverage settings, removed or non-blocking CI steps, Git hook bypasses. tier "high" = precise weakening (hasBlockingFindings=true means the change should not be considered done until each is fixed or explained to the user); tier "advisory" needs judgment and never blocks. Read-only; does not modify files.',
+    inputSchema: {
+      base: z.string().min(1).max(256).optional().describe('Compare with merge-base(HEAD, base). Default: HEAD (uncommitted and untracked changes).'),
+      staged: z.boolean().default(false).describe('Compare the index with HEAD instead of the working tree'),
+      maxFindings: z.number().int().min(1).max(MAX_FINDINGS_LIMIT).default(DEFAULT_MAX_FINDINGS),
+    },
+    outputSchema: integrityOutput,
+    annotations: readOnly,
+  }, args => invoke(() => checkIntegrity(args, workspace)));
   server.registerTool('ai_guard_rules', {
     description: 'List rules and preset severities. With preset, also return its enabled rule IDs. With rules (e.g. a ruleId from a finding), return only those rules with description, remediation and docs link.',
     inputSchema: {

@@ -10,6 +10,8 @@
  *   ai-guard changed --staged         # Staged files only
  *   ai-guard changed --base main      # Diff vs specific branch
  *   ai-guard changed --path packages/web  # Filter to subdirectory (monorepo)
+ *   ai-guard changed --pr --baseline  # Report only findings not in .ai-guard-baseline.json
+ *   ai-guard changed --pr --integrity enforce  # Also fail on weakened checks (skips, suppressions, …)
  */
 
 import type { Command } from 'commander';
@@ -17,8 +19,8 @@ import path from 'path';
 import fs from 'fs';
 import ora from 'ora';
 import chalk from 'chalk';
-import { runEslint, type Preset, type EcosystemIssue, ISSUE_CONFIDENCE } from '../utils/eslint-runner.js';
-import { log, CONFIDENCE_TIER, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER, type ConfidenceTier, isCollapsedByDefault } from '../utils/logger.js';
+import { runEslint, isInlineSuppressionMode, type Preset, type EcosystemIssue, type InlineSuppressionMode } from '../utils/eslint-runner.js';
+import { log, RULE_CATEGORY, CATEGORY_ICONS, CATEGORY_ORDER } from '../utils/logger.js';
 import { buildSarifLog, sarifToJson, buildSarifDebugInfo } from '../utils/sarif.js';
 import {
   getChangedFiles,
@@ -29,12 +31,14 @@ import {
   emitGitHubAnnotations,
   writeGitHubSummary,
   writeGitHubOutputs,
-  buildGitHubSummaryMarkdown,
 } from '../utils/github-summary.js';
-import { printGitDebug, printCIDebug } from '../utils/debug.js';
+import { BASELINE_FILE, filterBaselinedIssues, loadBaseline, resolveBaselinePath } from '../utils/baseline.js';
 import { PKG_VERSION } from '../utils/version.js';
-import { getRunExitCode, formatIssueCount, renderIssuesByFile, partitionByTier, buildSignalSummary, resolveExitCode } from './run.js';
+import { formatIssueCount, renderIssuesByFile, renderSuppressedIssues, partitionByTier, buildSignalSummary, resolveExitCode } from './run.js';
 import type { RunResult } from '../utils/eslint-runner.js';
+import { isIntegrityOption, runCliIntegrity, type IntegrityOption } from '../utils/integrity/run.js';
+import { integrityExitCode, type IntegrityEnvelope } from '../utils/integrity/types.js';
+import { integrityJson, integrityTextLines } from '../utils/integrity/report.js';
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +54,9 @@ export function registerChangedCommand(program: Command): void {
     .option('--strict', 'Use the strict rule preset (all rules at error)')
     .option('--security', 'Use the security-only rule preset')
     .option('--fail-on <level>', 'Fail CI on: high | medium | any | errors | none', 'high')
+    .option('--baseline [file]', `Report only findings not recorded in the baseline (default file: ${BASELINE_FILE})`)
+    .option('--integrity <mode>', 'Also detect weakened checks vs the base revision: off (default) | report | enforce', 'off')
+    .option('--inline-suppressions <mode>', 'Inline eslint-disable directives covering AI Guard findings: allow (default) | require-reason | ignore')
     .option('--json', 'Output results as JSON')
     .option('--sarif', 'Output results as SARIF 2.1.0 (for GitHub Code Scanning)')
     .option('--sarif-output <file>', 'Write SARIF to this file path')
@@ -74,6 +81,9 @@ export function registerChangedCommand(program: Command): void {
       strict?: boolean;
       security?: boolean;
       failOn: string;
+      baseline?: string | boolean;
+      integrity: string;
+      inlineSuppressions?: string;
       json?: boolean;
       sarif?: boolean;
       sarifOutput?: string;
@@ -89,6 +99,19 @@ export function registerChangedCommand(program: Command): void {
       debugSarifPaths?: boolean;
       debugSarifPersistence?: boolean;
     }) => {
+      if (!isIntegrityOption(opts.integrity)) {
+        log.error(`Unknown --integrity '${opts.integrity}'. Valid modes: off, report, enforce`);
+        process.exit(1);
+        return;
+      }
+      if (opts.inlineSuppressions !== undefined && !isInlineSuppressionMode(opts.inlineSuppressions)) {
+        log.error(`Unknown --inline-suppressions '${opts.inlineSuppressions}'. Valid modes: allow, require-reason, ignore`);
+        process.exit(1);
+        return;
+      }
+      const integrityOption: IntegrityOption = opts.integrity;
+      const inlineSuppressions = opts.inlineSuppressions as InlineSuppressionMode | undefined;
+
       let preset: Preset = 'recommended';
       if (opts.preset) {
         if (opts.preset === 'recommended' || opts.preset === 'strict' || opts.preset === 'security' || opts.preset === 'agent') {
@@ -143,8 +166,44 @@ export function registerChangedCommand(program: Command): void {
         });
       }
 
-      // ── Detect changed files ─────────────────────────────────────────────────
+      // ── Load baseline (fail fast, before scanning) ──────────────────────────
       const cwd = process.cwd();
+      let baseline: BaselineContext | undefined;
+      if (opts.baseline !== undefined && opts.baseline !== false) {
+        const baselinePath = resolveBaselinePath(cwd, typeof opts.baseline === 'string' ? opts.baseline : undefined);
+        const loaded = loadBaseline(baselinePath);
+        if (loaded.status !== 'ok') {
+          // Exit 2 = scan did not run. A configured-but-unusable baseline must
+          // never degrade into "report everything" or "report nothing".
+          const reason = loaded.status === 'missing' ? 'file not found' : loaded.reason;
+          log.error(`Cannot use baseline ${path.relative(cwd, baselinePath) || baselinePath}: ${reason}`);
+          if (loaded.status === 'missing') {
+            log.error(`Create it with: ai-guard baseline --save --preset ${preset}`);
+          }
+          process.exit(2);
+          return;
+        }
+        if (loaded.baseline.preset !== preset && !opts.json && !opts.sarif) {
+          log.warn(`Baseline was recorded with preset '${loaded.baseline.preset}' but this scan uses '${preset}'. Findings from rules outside the baseline preset will all be reported as new.`);
+        }
+        baseline = { path: path.relative(cwd, baselinePath).replace(/\\/g, '/'), file: loaded.baseline };
+      }
+
+      // ── Check integrity (opt-in) ────────────────────────────────────────────
+      // Compares the same base the changed-file scan uses: merge-base with the
+      // PR base branch, HEAD for uncommitted changes, or the index for --staged.
+      const integrityFor = (): Promise<IntegrityEnvelope | undefined> => {
+        if (integrityOption === 'off') return Promise.resolve(undefined);
+        return runCliIntegrity({
+          cwd,
+          mode: integrityOption,
+          base: opts.staged ? undefined : baseRef,
+          staged: opts.staged,
+          baselinePath: typeof opts.baseline === 'string' ? opts.baseline : undefined,
+        });
+      };
+
+      // ── Detect changed files ─────────────────────────────────────────────────
       const resolvedPath = path.resolve(opts.path);
       const workingDirectory = opts.path !== '.' ? opts.path : undefined;
 
@@ -180,8 +239,27 @@ export function registerChangedCommand(program: Command): void {
             preset,
             targetPath: resolvedPath.toString(),
             debugTiming: opts.debugTiming,
+            inlineSuppressions,
           });
-          handleResults(result, opts, preset, 'full', 0, inCI, resolvedSarifPath);
+          result.integrity = await integrityFor();
+          handleResults(result, opts, preset, 'full', 0, inCI, resolvedSarifPath, baseline);
+          return;
+        }
+
+        // With --integrity, deleted tests or config-only changes still need
+        // analysis even though there is no JS/TS file to lint.
+        if (integrityOption !== 'off') {
+          if (!opts.json && !opts.sarif) {
+            log.blank();
+            log.print(`  ${chalk.yellow('⚠')}  No changed JS/TS files to lint — running check-integrity analysis only`);
+          }
+          const empty: RunResult = {
+            files: [], totalErrors: 0, totalWarnings: 0, totalIssues: 0, filesScanned: 0,
+            ruleBreakdown: new Map(), topFiles: [], durationMs: 0, ecosystemIssues: [], parserErrors: [],
+            ignoredFiles: [], tsParserAvailable: true, suppressedIssues: [], inlineSuppressions: inlineSuppressions ?? 'allow',
+          };
+          empty.integrity = await integrityFor();
+          handleResults(empty, opts, preset, changedResult.mode === 'staged' ? 'staged' : 'changed', 0, inCI, resolvedSarifPath, baseline);
           return;
         }
 
@@ -228,20 +306,28 @@ export function registerChangedCommand(program: Command): void {
         targetPath: resolvedPath.toString(),
         files: changedResult.files,
         debugTiming: opts.debugTiming,
+        inlineSuppressions,
       });
+      result.integrity = await integrityFor();
 
       spinner?.stop();
 
       const scanMode: 'full' | 'changed' | 'staged' =
         changedResult.mode === 'staged' ? 'staged' : 'changed';
-      handleResults(result, opts, preset, scanMode, changedResult.files.length, inCI, resolvedSarifPath);
+      handleResults(result, opts, preset, scanMode, changedResult.files.length, inCI, resolvedSarifPath, baseline);
     });
 }
 
 // ─── Shared result handler ────────────────────────────────────────────────────
 
+interface BaselineContext {
+  /** Baseline path relative to cwd, POSIX separators (for output). */
+  path: string;
+  file: import('../utils/baseline.js').BaselineFile;
+}
+
 function handleResults(
-  result: RunResult,
+  scanResult: RunResult,
   opts: {
     failOn: string;
     json?: boolean;
@@ -264,10 +350,18 @@ function handleResults(
   changedFilesCount: number,
   inCI: boolean,
   resolvedSarifPath?: string,
-): Promise<void> {
+  baseline?: BaselineContext,
+): void {
+  // ── Baseline filtering ─────────────────────────────────────────────────────
+  // Everything downstream (annotations, summary, SARIF, JSON, exit code) sees
+  // only findings that are new relative to the baseline.
+  const filtered = baseline ? filterBaselinedIssues(scanResult, baseline.file) : undefined;
+  const result = filtered?.result ?? scanResult;
+  const baselineSuppressed = filtered?.suppressed;
+
   // ── GitHub integrations ────────────────────────────────────────────────────
   if (inCI || opts.githubSummary) {
-    writeGitHubSummary(result, { preset, scanMode, changedFilesCount });
+    writeGitHubSummary(result, { preset, scanMode, changedFilesCount, baselineSuppressed });
     writeGitHubOutputs(result, opts.sarifOutput);
     // stdout must stay valid JSON/SARIF when it carries machine-readable output.
     const stdoutIsData = opts.json || (Boolean(opts.sarif) && !resolvedSarifPath);
@@ -395,6 +489,12 @@ function handleResults(
       ecosystemIssues: result.ecosystemIssues,
       parserErrors: result.parserErrors,
       tsParserAvailable: result.tsParserAvailable,
+      inlineSuppressions: result.inlineSuppressions,
+      suppressedIssues: result.suppressedIssues ?? [],
+      integrity: result.integrity ? integrityJson(result.integrity) : undefined,
+      baseline: baseline
+        ? { path: baseline.path, mode: baseline.file.mode, preset: baseline.file.preset, suppressed: baselineSuppressed }
+        : undefined,
     };
     console.log(JSON.stringify(jsonOutput, null, 2));
     process.exit(getFailOnExitCode(result, opts.failOn, opts.maxWarnings));
@@ -412,17 +512,24 @@ function handleResults(
     ? `${changedFilesCount} changed`
     : '';
 
-  log.summary(
+  log.scanStats(
     result.filesScanned,
-    result.totalIssues,
     result.files.filter((f) => f.issues.length > 0).length,
     result.durationMs,
-    `${preset} · ${scanModeLabel}${modeTag ? ` (${modeTag})` : ''}` as string,
+    `${preset} · ${scanModeLabel}${modeTag ? ` (${modeTag})` : ''}`,
   );
+
+  if (baseline && baselineSuppressed !== undefined) {
+    log.info(
+      `Baseline ${chalk.white(baseline.path)}: ${baselineSuppressed} existing finding${baselineSuppressed !== 1 ? 's' : ''} hidden — showing only new findings`,
+    );
+  }
 
   if (result.totalIssues === 0) {
     log.blank();
-    log.success(`No AI issues found — ${result.filesScanned} file${result.filesScanned !== 1 ? 's' : ''} scanned, all clean`);
+    log.success(baseline
+      ? `No new AI issues relative to the baseline — ${result.filesScanned} file${result.filesScanned !== 1 ? 's' : ''} scanned`
+      : `No AI issues found — ${result.filesScanned} file${result.filesScanned !== 1 ? 's' : ''} scanned, all clean`);
     log.blank();
   } else {
     const verbose = opts.verbose ?? false;
@@ -477,6 +584,9 @@ function handleResults(
     }
   }
 
+  renderSuppressedIssues(result);
+  if (result.integrity) renderIntegrity(result.integrity);
+
   // Ecosystem issues
   if (result.ecosystemIssues.length > 0) {
     log.ecosystemSection('ESLint Config Issues');
@@ -497,7 +607,10 @@ function handleResults(
   log.divider();
   log.blank();
   log.section('Next Steps');
-  if (result.totalIssues > 0) {
+  if (result.totalIssues > 0 && baseline) {
+    log.info(`Run ${chalk.cyan('ai-guard baseline --save')} after fixing or accepting these to update the baseline`);
+    log.info(`Run ${chalk.cyan('ai-guard report')}   to generate a shareable HTML report`);
+  } else if (result.totalIssues > 0) {
     log.info(`Run ${chalk.cyan('ai-guard baseline')} to save these issues and track only new ones`);
     log.info(`Run ${chalk.cyan('ai-guard report')}   to generate a shareable HTML report`);
   }
@@ -520,5 +633,19 @@ export function getFailOnExitCode(
   failOn: string,
   maxWarnings?: number,
 ): number {
-  return resolveExitCode(result, failOn, maxWarnings);
+  // Lint findings follow --fail-on; check integrity contributes only in
+  // enforce mode (1 = blocking finding, 2 = analysis could not run).
+  return Math.max(resolveExitCode(result, failOn, maxWarnings), integrityExitCode(result.integrity));
+}
+
+function renderIntegrity(envelope: IntegrityEnvelope): void {
+  log.section('Check Integrity');
+  const lines = integrityTextLines(envelope);
+  for (const line of lines) {
+    if (line.startsWith('  HIGH')) log.print(chalk.red(line));
+    else if (line.startsWith('  advisory')) log.print(chalk.yellow(line));
+    else if (line.startsWith('            ')) log.print(chalk.white(line));
+    else log.print(`  ${chalk.gray(line)}`);
+  }
+  log.blank();
 }

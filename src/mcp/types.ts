@@ -22,6 +22,11 @@ export interface McpIssue {
   category?: string;
   remediation?: string;
   fixable: boolean;
+  /**
+   * An inline eslint-disable directive covers this finding. MCP scans never let
+   * directives hide findings (inline-suppressions mode "ignore").
+   */
+  inlineDirective?: { kind: string; line: number; text: string; justification?: string };
 }
 
 // ─── Tool result types ────────────────────────────────────────────────────────
@@ -41,6 +46,8 @@ export interface ScanResult {
   totalErrors: number;
   totalWarnings: number;
   preset: string;
+  /** Always "ignore" for MCP: inline directives never hide findings. */
+  inlineSuppressions?: 'ignore';
 }
 
 export interface ScanDiffResult extends ScanResult {
@@ -90,5 +97,13 @@ export function toMcpIssue(issue: IssueDetail, filePath: string): McpIssue {
     category: issue.category,
     remediation: issue.remediation,
     fixable: false, // MCP does not offer automatic source modification.
+    ...(issue.suppression ? {
+      inlineDirective: {
+        kind: issue.suppression.kind,
+        line: issue.suppression.line,
+        text: issue.suppression.text,
+        ...(issue.suppression.justification ? { justification: issue.suppression.justification } : {}),
+      },
+    } : {}),
   };
 }

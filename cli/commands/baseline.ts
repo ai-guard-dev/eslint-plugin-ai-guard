@@ -1,151 +1,18 @@
 import type { Command } from 'commander';
-import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { runEslint, type Preset, type RunResult } from '../utils/eslint-runner.js';
 import { log } from '../utils/logger.js';
-
-const BASELINE_FILE = '.ai-guard-baseline.json';
-
-// ─── Baseline format ──────────────────────────────────────────────────────────
-
-interface BaselineIssue {
-  ruleId: string;
-  message: string;
-  line: number;
-  column: number;
-}
-
-type BaselineMode = 'strict' | 'stable';
-
-interface BaselineEntry {
-  filePath: string;
-  issues: BaselineIssue[];
-}
-
-interface BaselineFile {
-  createdAt: string;
-  preset: Preset;
-  mode: BaselineMode;
-  totalIssues: number;
-  entries: BaselineEntry[];
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function saveBaseline(
-  result: RunResult,
-  preset: Preset,
-  mode: BaselineMode,
-  cwd: string,
-): string {
-  const entries: BaselineEntry[] = result.files.map((f) => ({
-    filePath: f.filePath,
-    issues: f.issues.map((i) => ({
-      ruleId: i.ruleId,
-      message: i.message,
-      line: i.line,
-      column: i.column,
-    })),
-  }));
-
-  const baseline: BaselineFile = {
-    createdAt: new Date().toISOString(),
-    preset,
-    mode,
-    totalIssues: result.totalIssues,
-    entries,
-  };
-
-  const baselinePath = path.join(cwd, BASELINE_FILE);
-  fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2), 'utf-8');
-  return baselinePath;
-}
-
-function loadBaseline(cwd: string): BaselineFile | null {
-  const baselinePath = path.join(cwd, BASELINE_FILE);
-  if (!fs.existsSync(baselinePath)) return null;
-  try {
-    const raw = fs.readFileSync(baselinePath, 'utf-8');
-    return JSON.parse(raw) as BaselineFile;
-  } catch {
-    return null;
-  }
-}
-
-type IssueKey = string;
-
-function issueKey(filePath: string, issue: BaselineIssue): IssueKey {
-  // Normalize path separators to forward slashes for cross-platform compatibility (M11)
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  return `${normalizedPath}::${issue.ruleId}::${issue.line}::${issue.column}::${issue.message}`;
-}
-
-function stableIssueKey(filePath: string, issue: BaselineIssue): IssueKey {
-  // Normalize path separators to forward slashes for cross-platform compatibility (M11)
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  return `${normalizedPath}::${issue.ruleId}::${issue.message}`;
-}
-
-function buildBaselineSet(baseline: BaselineFile, mode: BaselineMode): Set<IssueKey> {
-  const toKey = mode === 'stable' ? stableIssueKey : issueKey;
-  const set = new Set<IssueKey>();
-  for (const entry of baseline.entries) {
-    for (const issue of entry.issues) {
-      set.add(toKey(entry.filePath, issue));
-    }
-  }
-  return set;
-}
-
-function computeNewIssues(
-  result: RunResult,
-  baselineSet: Set<IssueKey>,
-  mode: BaselineMode,
-): RunResult {
-  const toKey = mode === 'stable' ? stableIssueKey : issueKey;
-  const newFiles: RunResult['files'] = [];
-  let totalErrors = 0;
-  let totalWarnings = 0;
-  const ruleBreakdown = new Map<string, number>();
-
-  for (const file of result.files) {
-    const newIssues = file.issues.filter(
-      (i) => !baselineSet.has(toKey(file.filePath, i)),
-    );
-    if (newIssues.length === 0) continue;
-
-    const errorCount = newIssues.filter((i) => i.severity === 2).length;
-    const warningCount = newIssues.filter((i) => i.severity === 1).length;
-    totalErrors += errorCount;
-    totalWarnings += warningCount;
-
-    for (const issue of newIssues) {
-      ruleBreakdown.set(
-        issue.ruleId,
-        (ruleBreakdown.get(issue.ruleId) ?? 0) + 1,
-      );
-    }
-
-    newFiles.push({ ...file, issues: newIssues, errorCount, warningCount });
-  }
-
-  const topFiles = [...newFiles]
-    .sort((a, b) => b.issues.length - a.issues.length)
-    .slice(0, 10)
-    .map((f) => ({ path: f.filePath, count: f.issues.length }));
-
-  return {
-    files: newFiles,
-    totalErrors,
-    totalWarnings,
-    totalIssues: totalErrors + totalWarnings,
-    ruleBreakdown,
-    topFiles,
-    durationMs: result.durationMs,
-  };
-}
+import {
+  BASELINE_FILE,
+  buildBaseline,
+  filterBaselinedIssues,
+  loadBaseline,
+  resolveBaselinePath,
+  writeBaseline,
+  type BaselineMode,
+} from '../utils/baseline.js';
 
 // ─── Command ──────────────────────────────────────────────────────────────────
 
@@ -157,16 +24,15 @@ export function registerBaselineCommand(program: Command): void {
     .option('--check', 'Show only issues introduced since the last baseline')
     .option('--mode <name>', 'Baseline match mode: strict | stable', 'stable')
     .option('--path <dir>', 'Directory to scan', '.')
-    .option('--preset <name>', 'Preset: recommended | strict | security | agent', 'recommended')
+    .option('--preset <name>', 'Preset: recommended (default for --save) | strict | security | agent. --check defaults to the preset stored in the baseline')
     .action(async (action: string | undefined, opts: {
       save?: boolean;
       check?: boolean;
       mode?: string;
       path: string;
-      preset: string;
+      preset?: string;
     }) => {
       const cwd = process.cwd();
-      const preset = (opts.preset as Preset) ?? 'recommended';
       const mode = (opts.mode as BaselineMode) ?? 'stable';
 
       const isSaveAction = action === 'save' || opts.save === true;
@@ -180,8 +46,25 @@ export function registerBaselineCommand(program: Command): void {
       log.banner('AI GUARD BASELINE');
       log.blank();
 
+      const baselinePath = resolveBaselinePath(cwd);
+      const loaded = loadBaseline(baselinePath);
+      if (loaded.status === 'invalid' && !isSaveAction) {
+        // Never silently re-baseline over a corrupt file: that would hide every
+        // finding introduced since the original baseline was written.
+        log.error(`Baseline file ${chalk.white(BASELINE_FILE)} is invalid: ${loaded.reason}`);
+        log.info(`Fix the file, or run ${chalk.cyan('ai-guard baseline --save')} to overwrite it.`);
+        process.exit(1);
+      }
+      const existingBaseline = loaded.status === 'ok' ? loaded.baseline : null;
+
+      // --check compares against the preset the baseline was recorded with
+      // unless --preset overrides it; otherwise extra strict-only findings
+      // would all show up as "new".
+      const preset = (opts.preset as Preset | undefined)
+        ?? (isSaveAction ? undefined : existingBaseline?.preset)
+        ?? 'recommended';
+
       // If neither flag/action provided, default to save if no baseline exists, else check
-      const existingBaseline = loadBaseline(cwd);
       const doSave = isSaveAction || (!action && !opts.save && !opts.check && !existingBaseline);
       const doCheck = isCheckAction || (!action && !opts.save && !opts.check && existingBaseline !== null);
 
@@ -199,7 +82,12 @@ export function registerBaselineCommand(program: Command): void {
           process.exit(1);
         }
 
-        const baselinePath = saveBaseline(result!, preset, mode, cwd);
+        // Keep explicit integrity acceptances; `--save` never creates or changes them.
+        const keptIntegrity = existingBaseline?.integrity;
+        writeBaseline(baselinePath, {
+          ...buildBaseline(result!, preset, mode),
+          ...(keptIntegrity ? { integrity: keptIntegrity } : {}),
+        });
         log.success(
           `Baseline saved → ${chalk.white(path.relative(cwd, baselinePath))}`,
         );
@@ -223,7 +111,7 @@ export function registerBaselineCommand(program: Command): void {
         const baselineDate = new Date(existingBaseline.createdAt).toLocaleString();
         log.info(`Baseline from: ${chalk.gray(baselineDate)}`);
         log.info(`Baseline preset: ${chalk.cyan(existingBaseline.preset)}`);
-        log.info(`Baseline mode: ${chalk.cyan(existingBaseline.mode ?? 'strict')}`);
+        log.info(`Baseline mode: ${chalk.cyan(existingBaseline.mode)}`);
         log.info(`Baseline issues: ${chalk.gray(existingBaseline.totalIssues)}`);
         log.blank();
 
@@ -239,9 +127,7 @@ export function registerBaselineCommand(program: Command): void {
           process.exit(1);
         }
 
-        const compareMode = existingBaseline.mode ?? 'strict';
-        const baselineSet = buildBaselineSet(existingBaseline!, compareMode);
-        const newResult = computeNewIssues(result!, baselineSet, compareMode);
+        const { result: newResult } = filterBaselinedIssues(result!, existingBaseline);
 
         if (newResult.totalIssues === 0) {
           log.success('No new issues since baseline! ✨');

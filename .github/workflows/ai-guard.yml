@@ -42,6 +42,7 @@ jobs:
             --strict \
             --sarif \
             --sarif-output ai-guard-results.sarif \
+            --integrity report \
             --fail-on none
         continue-on-error: true
 

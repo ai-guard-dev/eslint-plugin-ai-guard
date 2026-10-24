@@ -66,7 +66,7 @@ ai-guard's `CLAUDE.md` teaches Claude to:
 It also documents:
 - The repository architecture (rule structure, CLI commands, test conventions)
 - SARIF integration details (so Claude doesn't accidentally break the persistence logic)
-- Suppression conventions (`// ai-guard-disable rule-name -- reason`)
+- Suppression conventions (`// eslint-disable-next-line ai-guard/<rule> -- <reason>`)
 
 ---
 

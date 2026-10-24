@@ -4,6 +4,7 @@ import { pathToFileURL, fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { log } from './logger.js';
 import { AGENT_RULES } from '../../src/configs/agent.js';
+import { findCoveringDirective, parseEslintDirective, type EslintDirective } from './directives.js';
 export { AGENT_RULES };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -25,6 +26,40 @@ export interface RunOptions {
   workingDirectory?: string;
   /** Use packaged rules/parser, never load plugin code from the scanned workspace. */
   isolated?: boolean;
+  /**
+   * How inline ESLint directives that cover AI Guard findings are treated.
+   * Defaults to 'allow' for CLI scans and 'ignore' for isolated (MCP) scans.
+   */
+  inlineSuppressions?: InlineSuppressionMode;
+}
+
+/**
+ * Inline suppression policy for AI Guard findings.
+ * - allow:          a covering directive hides the finding from totals and exit
+ *                   codes; it is still listed in `suppressedIssues`.
+ * - require-reason: only directives with a ` -- reason` hide findings.
+ * - ignore:         directives never hide AI Guard findings.
+ */
+export type InlineSuppressionMode = 'allow' | 'require-reason' | 'ignore';
+
+export const INLINE_SUPPRESSION_MODES: readonly InlineSuppressionMode[] = ['allow', 'require-reason', 'ignore'];
+
+export function isInlineSuppressionMode(value: unknown): value is InlineSuppressionMode {
+  return typeof value === 'string' && (INLINE_SUPPRESSION_MODES as readonly string[]).includes(value);
+}
+
+/** The inline directive that covers a finding. */
+export interface SuppressionDirective {
+  kind: EslintDirective['kind'];
+  line: number;
+  text: string;
+  justification?: string;
+}
+
+export interface SuppressedIssue {
+  filePath: string;
+  issue: IssueDetail;
+  directive: SuppressionDirective;
 }
 
 export interface IssueDetail {
@@ -43,6 +78,11 @@ export interface IssueDetail {
   asyncRiskType?: string;
   /** Short remediation guidance */
   remediation?: string;
+  /**
+   * Set when an inline directive covers this finding but did not hide it
+   * (inline-suppressions mode 'ignore', or 'require-reason' without a reason).
+   */
+  suppression?: SuppressionDirective & { honored: false; reason: 'mode-ignore' | 'missing-justification' };
 }
 
 export interface FileResult {
@@ -103,6 +143,12 @@ export interface RunResult {
   ignoredFiles: string[];
   /** True if @typescript-eslint/parser was found and loaded */
   tsParserAvailable: boolean;
+  /** AI Guard findings hidden by inline directives (never counted in totals). */
+  suppressedIssues?: SuppressedIssue[];
+  /** Policy applied to inline directives for this scan. */
+  inlineSuppressions?: InlineSuppressionMode;
+  /** Check-weakening analysis attached by `changed --integrity` (see cli/utils/integrity). */
+  integrity?: import('./integrity/types.js').IntegrityEnvelope;
 }
 
 // ─── Module-level cache ───────────────────────────────────────────────────────
@@ -464,6 +510,84 @@ async function loadPluginModuleFromCwd(cwd: string): Promise<unknown> {
   );
 }
 
+// ─── Inline directive collector ───────────────────────────────────────────────
+//
+// The runner lints with inline configuration disabled, so ESLint itself never
+// hides an AI Guard finding. This internal rule records each file's ESLint
+// directive comments from the real parse (comments only, so directive-like
+// text inside strings is ignored); applySuppressionPolicy then decides which
+// findings a directive covers. It never reports problems.
+
+const directiveSink = new Map<string, EslintDirective[]>();
+
+interface CollectorComment {
+  type: string;
+  value: string;
+  loc: { start: { line: number; column: number }; end: { line: number; column: number } };
+}
+
+const directiveCollectorRule = {
+  meta: { type: 'problem', schema: [] },
+  create(context: {
+    filename?: string;
+    getFilename?: () => string;
+    sourceCode?: { getAllComments(): CollectorComment[] };
+    getSourceCode?: () => { getAllComments(): CollectorComment[] };
+  }) {
+    return {
+      Program(): void {
+        const sourceCode = context.sourceCode ?? context.getSourceCode?.();
+        const filename = context.filename ?? context.getFilename?.();
+        if (!sourceCode || !filename) return;
+        const found: EslintDirective[] = [];
+        for (const c of sourceCode.getAllComments()) {
+          const d = parseEslintDirective({
+            type: c.type, value: c.value,
+            line: c.loc.start.line, column: c.loc.start.column,
+            endLine: c.loc.end.line, endColumn: c.loc.end.column,
+          });
+          if (d) found.push(d);
+        }
+        if (found.length > 0) directiveSink.set(path.resolve(filename), found);
+      },
+    };
+  },
+};
+
+const INTERNAL_PLUGIN = { rules: { directives: directiveCollectorRule } };
+const INTERNAL_RULES = { 'ai-guard-internal/directives': 'warn' };
+
+/**
+ * Split a file's findings into active and suppressed according to the policy.
+ * Shared by every scan path so CLI, Action, hook and MCP agree.
+ */
+export function applySuppressionPolicy(
+  issues: IssueDetail[],
+  directives: readonly EslintDirective[],
+  mode: InlineSuppressionMode,
+): { active: IssueDetail[]; suppressed: Array<{ issue: IssueDetail; directive: SuppressionDirective }> } {
+  if (directives.length === 0) return { active: issues, suppressed: [] };
+  const active: IssueDetail[] = [];
+  const suppressed: Array<{ issue: IssueDetail; directive: SuppressionDirective }> = [];
+  for (const issue of issues) {
+    const d = findCoveringDirective(directives, issue.ruleId, issue.line, issue.column);
+    if (!d) { active.push(issue); continue; }
+    const directive: SuppressionDirective = {
+      kind: d.kind, line: d.line, text: d.text,
+      ...(d.justification ? { justification: d.justification } : {}),
+    };
+    if (mode === 'allow' || (mode === 'require-reason' && d.justification)) {
+      suppressed.push({ issue, directive });
+    } else {
+      active.push({
+        ...issue,
+        suppression: { ...directive, honored: false, reason: mode === 'ignore' ? 'mode-ignore' : 'missing-justification' },
+      });
+    }
+  }
+  return { active, suppressed };
+}
+
 // ─── Cached runner builder ────────────────────────────────────────────────────
 //
 // PERFORMANCE: This function builds the ESLint instance and caches it. All
@@ -530,18 +654,13 @@ async function getOrBuildRunner(
   // separate blocks reduces ESLint's config resolution overhead. The ignores
   // block is placed first so ESLint can skip excluded files early.
 
-  const JS_TS_FILES = [
-    '**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx',
-    '**/*.mts', '**/*.cts', '**/*.mjs', '**/*.cjs',
-  ];
-
   const configBlocks: Array<Record<string, unknown>> = [
     // Ignore block first — ESLint can skip excluded files without processing
     { ignores: DEFAULT_IGNORE_PATTERNS },
     // JS/JSX — espree parser with JSX support
     {
       files: ['**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs'],
-      plugins: { 'ai-guard': plugin } as Record<string, unknown>,
+      plugins: { 'ai-guard': plugin, 'ai-guard-internal': INTERNAL_PLUGIN } as Record<string, unknown>,
       languageOptions: {
         parserOptions: {
           ecmaVersion: 'latest',
@@ -549,7 +668,7 @@ async function getOrBuildRunner(
           ecmaFeatures: { jsx: true },
         },
       },
-      rules: rules as Record<string, unknown>,
+      rules: { ...rules, ...INTERNAL_RULES } as Record<string, unknown>,
     },
   ];
 
@@ -557,7 +676,7 @@ async function getOrBuildRunner(
     // TS + TSX with TypeScript parser — JSX enabled for both
     configBlocks.push({
       files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
-      plugins: { 'ai-guard': plugin } as Record<string, unknown>,
+      plugins: { 'ai-guard': plugin, 'ai-guard-internal': INTERNAL_PLUGIN } as Record<string, unknown>,
       languageOptions: {
         parser: tsParser,
         parserOptions: {
@@ -566,13 +685,13 @@ async function getOrBuildRunner(
           ecmaFeatures: { jsx: true },
         },
       },
-      rules: rules as Record<string, unknown>,
+      rules: { ...rules, ...INTERNAL_RULES } as Record<string, unknown>,
     });
   } else {
     // No TS parser — lint ts/tsx with espree (may partially fail on TS syntax)
     configBlocks.push({
       files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
-      plugins: { 'ai-guard': plugin } as Record<string, unknown>,
+      plugins: { 'ai-guard': plugin, 'ai-guard-internal': INTERNAL_PLUGIN } as Record<string, unknown>,
       languageOptions: {
         parserOptions: {
           ecmaVersion: 'latest',
@@ -580,7 +699,7 @@ async function getOrBuildRunner(
           ecmaFeatures: { jsx: true },
         },
       },
-      rules: rules as Record<string, unknown>,
+      rules: { ...rules, ...INTERNAL_RULES } as Record<string, unknown>,
     });
   }
 
@@ -588,7 +707,10 @@ async function getOrBuildRunner(
     cwd: eslintCwd,
     overrideConfigFile: true as unknown as string,
     overrideConfig: configBlocks,
-    ...(isolated ? { allowInlineConfig: false } : {}),
+    // Inline directives are interpreted by applySuppressionPolicy, never by
+    // ESLint, so a comment cannot silently hide an AI Guard finding. This
+    // instance only runs AI Guard rules; users' own ESLint runs are unaffected.
+    allowInlineConfig: false,
   });
 
   const runner: CachedRunner = {
@@ -680,6 +802,9 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   const patterns = explicitFiles ?? JS_TS_FILE_PATTERNS; // explicit files are absolute
 
   const lintStart = Date.now();
+  directiveSink.clear();
+  const suppressionMode: InlineSuppressionMode =
+    options.inlineSuppressions ?? (options.isolated ? 'ignore' : 'allow');
   let rawResults: Array<{
     filePath: string;
     messages: Array<{
@@ -747,14 +872,13 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
   let totalErrors = 0;
   let totalWarnings = 0;
   const ignoredFiles: string[] = [];
+  const suppressedIssues: SuppressedIssue[] = [];
 
   for (const result of rawResults) {
     if (result.messages.length === 0) continue;
 
     const relPath = path.relative(cwd, result.filePath);
-    const aiGuardIssues: IssueDetail[] = [];
-    let fileErrors = 0;
-    let fileWarnings = 0;
+    const detected: IssueDetail[] = [];
 
     for (const m of result.messages) {
       // ESLint's "File ignored because of a matching ignore pattern" warning
@@ -802,16 +926,26 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
         remediation: ISSUE_REMEDIATION[ruleId],
       };
 
-      aiGuardIssues.push(issue);
+      detected.push(issue);
+    }
 
-      if (m.severity === 2) {
+    const { active: aiGuardIssues, suppressed } = applySuppressionPolicy(
+      detected,
+      directiveSink.get(path.resolve(result.filePath)) ?? [],
+      suppressionMode,
+    );
+    for (const s of suppressed) suppressedIssues.push({ filePath: relPath, ...s });
+
+    let fileErrors = 0;
+    let fileWarnings = 0;
+    for (const issue of aiGuardIssues) {
+      if (issue.severity === 2) {
         fileErrors++;
         totalErrors++;
       } else {
         fileWarnings++;
         totalWarnings++;
       }
-
       ruleBreakdown.set(
         issue.ruleId,
         (ruleBreakdown.get(issue.ruleId) ?? 0) + 1,
@@ -860,5 +994,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     parserErrors,
     ignoredFiles,
     tsParserAvailable: runner.tsParserAvailable,
+    suppressedIssues,
+    inlineSuppressions: suppressionMode,
   };
 }
