@@ -37,44 +37,37 @@ const DEFAULT_AUTH_MIDDLEWARE_NAMES = new Set([
 ]);
 
 /**
- * Route paths that are commonly public and should not require auth.
+ * First path segments that are commonly public and should not require auth.
+ *
+ * Matching is segment-exact (after stripping an `/api`, `/api/vN` or `/vN`
+ * prefix and a file extension), so `/auth/login` and `/api/v1/health` are
+ * public while `/authors`, `/publications` and `/devices/:id` are not.
+ *
+ * Debug, diagnostics, internal and dev routes are deliberately NOT listed:
+ * an unauthenticated `/debug` or `/internal` endpoint in a production router
+ * is exactly the gap this rule exists to catch. Files that are internal
+ * tooling are suppressed at the file level instead (see INTERNAL_SCRIPT_PATTERNS).
  */
-const PUBLIC_ROUTE_PATTERNS = [
-  /^\/?\s*$/,                        // '/' root or empty
-  /^\*$/,                            // '*' SPA fallback
-  /^\/\*$/,                          // '/*' SPA fallback
-  /^\/health/,                       // health checks
-  /^\/ping/,                         // ping
-  /^\/status/,                       // status
-  /^\/metrics/,                      // Prometheus metrics
-  /^\/ready/,                        // readiness probe
-  /^\/live/,                         // liveness probe
-  /^\/api\/v\d+\/auth/,              // versioned auth routes
-  /^\/auth/,                         // auth routes
-  /^\/login/,                        // login
-  /^\/logout/,                       // logout
-  /^\/register/,                     // register
-  /^\/signup/,                       // signup
-  /^\/forgot/,                       // forgot password
-  /^\/reset/,                        // reset password
-  /^\/verify/,                       // email verification
-  /^\/webhook/,                      // webhooks (typically verified by signature)
-  /^\/callback/,                     // OAuth callback
-  /^\/public/,                       // explicitly public
-  /^\/assets/,                       // static assets
-  /^\/static/,                       // static files
-  /^\/favicon/,                      // favicon
-  /^\/robots/,                       // robots.txt
-  /^\/sitemap/,                      // sitemap
-  /^\/api\/docs/,                    // API documentation (Swagger, etc.)
-  /^\/docs/,                         // documentation
-  /^\/swagger/,                      // Swagger UI
-  /^\/graphql/,                      // GraphQL (handles own auth)
-  /^\/debug/,                        // debug endpoints
-  /^\/diagnostics/,                  // diagnostics endpoints
-  /^\/internal/,                     // internal routes
-  /^\/dev/,                          // dev-only routes
-];
+const PUBLIC_ROUTE_SEGMENTS = new Set([
+  // health / probes
+  'health', 'healthz', 'healthcheck', 'health-check', 'ping', 'status', 'metrics',
+  'ready', 'readyz', 'readiness', 'live', 'livez', 'liveness',
+  // authentication flows
+  'auth', 'oauth', 'login', 'logout', 'signin', 'sign-in', 'signout', 'sign-out',
+  'register', 'signup', 'sign-up', 'forgot', 'forgot-password', 'reset',
+  'reset-password', 'password-reset', 'verify', 'verify-email', 'callback',
+  // webhooks (typically verified by signature)
+  'webhook', 'webhooks',
+  // static and well-known files
+  'public', 'assets', 'static', 'favicon', 'robots', 'sitemap', '.well-known',
+  // API documentation
+  'docs', 'api-docs', 'swagger', 'openapi',
+  // GraphQL endpoints handle auth in resolvers/context
+  'graphql',
+]);
+
+/** `/api`, `/api/v2`, `/v1` — stripped before matching the first segment. */
+const API_PREFIX_PATTERN = /^\/(?:api(?:\/v\d+)?|v\d+)(?=\/|$)/i;
 
 // ─── Context detection helpers ─────────────────────────────────────────────────
 //
@@ -184,7 +177,7 @@ export const requireAuthMiddleware = createRule({
     const allowInternalScripts = options.allowInternalScripts !== false; // default true
     const customNames = new Set(options.authMiddlewareNames ?? []);
     const allAuthNames = new Set([...DEFAULT_AUTH_MIDDLEWARE_NAMES, ...customNames]);
-    const extraPatterns = (options.internalPathPatterns ?? []).map((p) => new RegExp(p, 'i'));
+    const extraPatterns = (options.internalPathPatterns ?? []).map(compileInternalPathPattern);
 
     const filePath = context.filename ?? context.getFilename?.() ?? '';
 
@@ -207,28 +200,50 @@ export const requireAuthMiddleware = createRule({
 
     // ── Route analysis ────────────────────────────────────────────────────
 
-    // Track which router objects have blanket auth (router.use(protect))
-    // Key = router variable name, Value = true if auth middleware applied.
-    // This prevents state leaking across different router instances.
-    const routersWithAuth = new Set<string>();
+    // Track blanket auth per router object (router.use(protect),
+    // fastify.addHook('onRequest', fastify.authenticate)).
+    // Key = router variable name. Value = 'all' when auth covers every later
+    // route on that router, or the mount prefixes it covers
+    // (router.use('/admin', protect)). Keying by name prevents auth state
+    // leaking across different router instances.
+    const routerAuthScopes = new Map<string, 'all' | string[]>();
+
+    function recordBlanketAuth(routerName: string, prefix: string | null): void {
+      const existing = routerAuthScopes.get(routerName);
+      if (existing === 'all') return;
+      const normalized = prefix === null ? '' : normalizeMountPrefix(prefix);
+      if (normalized === '') {
+        routerAuthScopes.set(routerName, 'all');
+        return;
+      }
+      routerAuthScopes.set(routerName, [...(existing ?? []), normalized]);
+    }
+
+    function isCoveredByBlanketAuth(routerName: string | null, pathStr: string | null): boolean {
+      if (!routerName) return false;
+      const scope = routerAuthScopes.get(routerName);
+      if (!scope) return false;
+      if (scope === 'all') return true;
+      // Dynamic path on a router with prefix-scoped auth: we cannot tell which
+      // prefix applies, so stay silent rather than guess.
+      if (pathStr === null) return true;
+      return scope.some((prefix) => pathStr === prefix || pathStr.startsWith(`${prefix}/`));
+    }
 
     return {
       CallExpression(node) {
-        // Detect router.use(protect) or app.use(protect) — blanket auth
-        if (isRouterUseAuth(node, allAuthNames)) {
+        // router.use(protect) / router.use('/admin', protect) — blanket auth
+        const blanket = getBlanketAuth(node, allAuthNames);
+        if (blanket) {
           const routerName = getRouterObjectName(node);
           if (routerName) {
-            routersWithAuth.add(routerName);
+            recordBlanketAuth(routerName, blanket.prefix);
           }
           return;
         }
 
         // Check for: router.get('/path', handler) or app.post('/path', handler)
         if (!isRouteDefinition(node)) return;
-
-        // If this specific router has blanket auth applied, skip
-        const routerName = getRouterObjectName(node);
-        if (routerName && routersWithAuth.has(routerName)) return;
 
         const callee = node.callee as TSESTree.MemberExpression;
         const method = (callee.property as TSESTree.Identifier).name;
@@ -239,26 +254,15 @@ export const requireAuthMiddleware = createRule({
         const pathArg = args[0];
         const pathStr = getPathString(pathArg);
 
+        // Skip routes covered by router-level auth registered earlier
+        if (isCoveredByBlanketAuth(getRouterObjectName(node), pathStr)) return;
+
         // Skip public routes
         if (pathStr && isPublicRoute(pathStr)) return;
 
-        // Check if any argument (between path and final handler) is an auth middleware
-        const middlewareArgs = args.slice(1, -1); // Exclude path and final handler
-
-        // If only path + handler (no middleware at all)
-        if (middlewareArgs.length === 0 && args.length === 2) {
-          context.report({
-            node,
-            messageId: 'missingAuth',
-            data: {
-              method: method.toUpperCase(),
-              path: pathStr || '<dynamic>',
-            },
-          });
-          return;
-        }
-
-        // Check if any middleware in the chain is an auth middleware
+        // Check if any argument between the path and the final handler is an
+        // auth middleware. For Fastify this includes the route options object.
+        const middlewareArgs = args.slice(1, -1);
         const hasAuth = middlewareArgs.some((arg) => isAuthMiddleware(arg, allAuthNames));
 
         if (!hasAuth) {
@@ -276,6 +280,40 @@ export const requireAuthMiddleware = createRule({
   },
 });
 
+/**
+ * Compile a user-supplied `internalPathPatterns` entry. An invalid regular
+ * expression becomes an error that names the rule and option instead of a
+ * bare SyntaxError from deep inside the lint run.
+ */
+function compileInternalPathPattern(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern, 'i');
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `ai-guard/require-auth-middleware: invalid regular expression in "internalPathPatterns": ${JSON.stringify(pattern)} (${reason})`,
+    );
+  }
+}
+
+/**
+ * Receivers that register HTTP routes: `app`, `router`, `fastify`, `server`,
+ * and names containing `router` or ending in `routes` (`adminRouter`,
+ * `userRoutes`). Generic names such as `api` or `client` are excluded because
+ * they are usually HTTP clients (`api.get('/users', config)`).
+ */
+function isRouterLikeName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower === 'app' ||
+    lower === 'router' ||
+    lower === 'fastify' ||
+    lower === 'server' ||
+    lower.includes('router') ||
+    lower.endsWith('routes')
+  );
+}
+
 function isRouteDefinition(node: TSESTree.CallExpression): boolean {
   if (node.callee.type !== AST_NODE_TYPES.MemberExpression) return false;
   if (node.callee.property.type !== AST_NODE_TYPES.Identifier) return false;
@@ -286,8 +324,7 @@ function isRouteDefinition(node: TSESTree.CallExpression): boolean {
   // The object should be a router/app-like identifier
   const obj = node.callee.object;
   if (obj.type === AST_NODE_TYPES.Identifier) {
-    const name = obj.name.toLowerCase();
-    return name === 'router' || name === 'app' || name.includes('router');
+    return isRouterLikeName(obj.name);
   }
   // Also handle: express.Router() chains
   if (obj.type === AST_NODE_TYPES.CallExpression) return true;
@@ -295,13 +332,49 @@ function isRouteDefinition(node: TSESTree.CallExpression): boolean {
   return false;
 }
 
-function isRouterUseAuth(node: TSESTree.CallExpression, authNames: Set<string>): boolean {
-  if (node.callee.type !== AST_NODE_TYPES.MemberExpression) return false;
-  if (node.callee.property.type !== AST_NODE_TYPES.Identifier) return false;
-  if (node.callee.property.name !== 'use') return false;
+/** Fastify lifecycle hooks that run before the handler and can enforce auth. */
+const FASTIFY_AUTH_HOOKS = new Set(['onRequest', 'preParsing', 'preValidation', 'preHandler']);
 
-  // Check if any argument is an auth middleware
-  return node.arguments.some((arg) => isAuthMiddleware(arg, authNames));
+/**
+ * Detect router-level auth:
+ *   router.use(protect)                                → { prefix: null }
+ *   router.use('/admin', protect)                      → { prefix: '/admin' }
+ *   fastify.addHook('onRequest', fastify.authenticate) → { prefix: null }
+ */
+function getBlanketAuth(
+  node: TSESTree.CallExpression,
+  authNames: Set<string>,
+): { prefix: string | null } | null {
+  if (node.callee.type !== AST_NODE_TYPES.MemberExpression) return null;
+  if (node.callee.property.type !== AST_NODE_TYPES.Identifier) return null;
+  const method = node.callee.property.name;
+
+  if (method === 'use') {
+    if (!node.arguments.some((arg) => isAuthMiddleware(arg, authNames))) return null;
+    const first = node.arguments[0];
+    // A dynamic mount path cannot be scoped — treat it as covering the router.
+    return { prefix: first ? getPathString(first) : null };
+  }
+
+  if (method === 'addHook') {
+    const [hookName, hookFn] = node.arguments;
+    if (
+      hookName?.type === AST_NODE_TYPES.Literal &&
+      typeof hookName.value === 'string' &&
+      FASTIFY_AUTH_HOOKS.has(hookName.value) &&
+      hookFn &&
+      isAuthMiddleware(hookFn, authNames)
+    ) {
+      return { prefix: null };
+    }
+  }
+
+  return null;
+}
+
+/** Strip trailing slashes so `/admin/` and `/admin` scope the same routes. */
+function normalizeMountPrefix(prefix: string): string {
+  return prefix.replace(/\/+$/, '');
 }
 
 /**
@@ -324,38 +397,63 @@ function getRouterObjectName(node: TSESTree.CallExpression): string | null {
   return null;
 }
 
+/**
+ * Recognize a member reference as auth middleware:
+ *   fastify.authenticate, app.verifyToken → property name is an auth name
+ *   passport.authenticate                 → dotted name is an auth name
+ *   auth.required, authMiddleware.jwt     → object name is an auth name
+ * `auth.optional`-style references are excluded: they let anonymous
+ * requests through.
+ */
+function isAuthMemberReference(node: TSESTree.MemberExpression, authNames: Set<string>): boolean {
+  if (node.computed || node.property.type !== AST_NODE_TYPES.Identifier) return false;
+  const propertyName = node.property.name;
+  if (authNames.has(propertyName)) return true;
+
+  if (node.object.type !== AST_NODE_TYPES.Identifier) return false;
+  const objectName = node.object.name;
+  if (authNames.has(`${objectName}.${propertyName}`)) return true;
+  return authNames.has(objectName) && propertyName !== 'optional';
+}
+
 function isAuthMiddleware(node: TSESTree.Node, authNames: Set<string>): boolean {
   // Direct identifier: protect, authenticate, etc.
   if (node.type === AST_NODE_TYPES.Identifier) {
     return authNames.has(node.name);
   }
 
-  // Fastify-style options object: { preHandler: authenticate, onRequest: verifyToken }
+  // Member reference: fastify.authenticate, auth.required
+  if (node.type === AST_NODE_TYPES.MemberExpression) {
+    return isAuthMemberReference(node, authNames);
+  }
+
+  // Middleware array: router.get('/x', [requireAuth, validate], handler)
+  if (node.type === AST_NODE_TYPES.ArrayExpression) {
+    return node.elements.some(
+      (el) => el !== null && el.type !== AST_NODE_TYPES.SpreadElement && isAuthMiddleware(el, authNames),
+    );
+  }
+
+  // Fastify-style options object: { preHandler: authenticate, onRequest: [fastify.authenticate] }
   if (node.type === AST_NODE_TYPES.ObjectExpression) {
     for (const prop of node.properties) {
       if (
         prop.type === AST_NODE_TYPES.Property &&
         prop.key.type === AST_NODE_TYPES.Identifier &&
-        (prop.key.name === 'preHandler' || prop.key.name === 'onRequest')
+        FASTIFY_AUTH_HOOKS.has(prop.key.name)
       ) {
         if (isAuthMiddleware(prop.value, authNames)) return true;
       }
     }
   }
 
-  // Call expression: authenticate('jwt'), authorize('admin')
+  // Call expression: authenticate('jwt'), authorize('admin'), passport.authenticate('jwt')
   if (node.type === AST_NODE_TYPES.CallExpression) {
     if (node.callee.type === AST_NODE_TYPES.Identifier) {
       return authNames.has(node.callee.name);
     }
-    // passport.authenticate(...)
-    if (
-      node.callee.type === AST_NODE_TYPES.MemberExpression &&
-      node.callee.object.type === AST_NODE_TYPES.Identifier &&
-      node.callee.property.type === AST_NODE_TYPES.Identifier
-    ) {
-      const fullName = `${node.callee.object.name}.${node.callee.property.name}`;
-      return authNames.has(fullName) || authNames.has(node.callee.property.name);
+    if (node.callee.type === AST_NODE_TYPES.MemberExpression) {
+      return isAuthMemberReference(node.callee, authNames);
     }
   }
 
@@ -378,7 +476,19 @@ function getPathString(node: TSESTree.Node): string | null {
 }
 
 function isPublicRoute(pathStr: string): boolean {
-  return PUBLIC_ROUTE_PATTERNS.some((pattern) => pattern.test(pathStr));
+  const trimmed = pathStr.trim();
+  // Root and SPA fallbacks
+  if (trimmed === '' || trimmed === '/' || trimmed === '*' || trimmed === '/*') return true;
+
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  const rest = withSlash.replace(API_PREFIX_PATTERN, '');
+  // `/api` or `/api/v1` on its own is an API index, not a known public route
+  if (rest === '' || rest === '/') return false;
+
+  const firstSegment = rest.slice(1).split('/')[0].toLowerCase();
+  // favicon.ico → favicon, robots.txt → robots, openapi.json → openapi
+  const baseName = firstSegment.replace(/\.[a-z0-9]+$/, '');
+  return PUBLIC_ROUTE_SEGMENTS.has(firstSegment) || PUBLIC_ROUTE_SEGMENTS.has(baseName);
 }
 
 export default requireAuthMiddleware;

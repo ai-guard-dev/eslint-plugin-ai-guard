@@ -177,29 +177,6 @@ function isDetachedHead(cwd: string): boolean {
   return result === null;
 }
 
-/**
- * Detect the default upstream branch (e.g., "main", "master", "develop").
- * Used when no base branch is specified or detectable.
- */
-function detectDefaultBranch(cwd: string): string | null {
-  // Try origin/HEAD (most reliable)
-  const symbolic = runGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], cwd);
-  if (symbolic) {
-    const match = /refs\/remotes\/origin\/(.+)$/.exec(symbolic);
-    if (match) return match[1];
-  }
-
-  // Try common branch names
-  for (const candidate of ['main', 'master', 'develop', 'development']) {
-    const check = runGit(['rev-parse', '--verify', `origin/${candidate}`], cwd);
-    if (check) return candidate;
-    const checkLocal = runGit(['rev-parse', '--verify', candidate], cwd);
-    if (checkLocal) return candidate;
-  }
-
-  return null;
-}
-
 // ─── Ref normalization ────────────────────────────────────────────────────────
 
 /**
@@ -387,7 +364,7 @@ export function getChangedFiles(
     cwd = process.cwd(),
     extensions = DEFAULT_EXTENSIONS,
     workingDirectory,
-    debug = false,
+    debug: _debug = false,
     includeUntracked,
   } = options;
 

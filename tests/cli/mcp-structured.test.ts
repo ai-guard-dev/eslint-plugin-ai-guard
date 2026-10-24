@@ -38,7 +38,7 @@ describe('MCP structured output', () => {
 
   it('declares output schemas and read-only annotations for every tool', async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(4);
+    expect(tools).toHaveLength(5);
     for (const tool of tools) {
       expect(tool.outputSchema?.type).toBe('object');
       expect(tool.annotations?.readOnlyHint).toBe(true);
@@ -55,6 +55,8 @@ describe('MCP structured output', () => {
       ['ai_guard_rules', {}],
       ['ai_guard_rules', { rules: ['no-empty-catch'] }],
       ['ai_guard_rules', { rules: ['no-such-rule'] }],
+      ['ai_guard_check_integrity', {}],
+      ['ai_guard_check_integrity', { base: '--option' }],
     ];
     for (const [name, args] of calls) {
       const res = await client.callTool({ name, arguments: args });

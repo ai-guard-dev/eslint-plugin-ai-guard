@@ -132,9 +132,10 @@ function workflowGuidanceMarkdown(): string {
   return `## Workflow Guardrails
 - Follow user and repository instructions first; apply these rules on top.
 - Reuse existing project patterns and libraries before introducing new abstractions.
-- If a rule must be bypassed intentionally, add a suppression comment with reason:
-  \`ai-guard-disable <rule-name> -- reason: <why>\`.
-- Before finalizing changes, run tests/lint and \`ai-guard run\` when available.`;
+- If a rule must be bypassed intentionally, suppress that one rule and line with a reason:
+  \`// eslint-disable-next-line ai-guard/<rule-name> -- <why>\`.
+- Never skip, focus or delete tests, add blanket \`eslint-disable\`/\`@ts-ignore\`, or lower coverage or strictness to make checks pass.
+- Before finalizing changes, run tests/lint, \`ai-guard run\` and \`ai-guard integrity\` when available.`;
 }
 
 function workflowGuidanceCursor(): string {
@@ -142,8 +143,9 @@ function workflowGuidanceCursor(): string {
 
 - Follow user and repository instructions first.
 - Prefer existing project patterns and dependencies.
-- If bypassing a rule intentionally, add: ai-guard-disable <rule-name> -- reason: <why>.
-- Validate generated code with tests/lint and ai-guard run when available.`;
+- If bypassing a rule intentionally, add: // eslint-disable-next-line ai-guard/<rule-name> -- <why>.
+- Never skip or delete tests or weaken lint, type or coverage settings to make checks pass.
+- Validate generated code with tests/lint, ai-guard run and ai-guard integrity when available.`;
 }
 
 function workflowGuidanceCopilot(): string {

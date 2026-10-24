@@ -107,16 +107,28 @@ describe('init-claude: writeClaudeSettings', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('init-claude: mergeAiGuardHook', () => {
-  it('adds hook to empty settings', () => {
-    const { settings, changed } = mergeAiGuardHook({});
+  it('adds every AI Guard hook to empty settings', () => {
+    const { settings, changed, added } = mergeAiGuardHook({});
 
     expect(changed).toBe(true);
+    expect(added).toEqual(['PostToolUse', 'SessionStart', 'Stop', 'PreToolUse']);
     expect(settings.hooks).toBeDefined();
     expect(settings.hooks!.PostToolUse).toHaveLength(1);
-    expect(settings.hooks!.PostToolUse![0].matcher).toBe('Edit|Write');
+    expect(settings.hooks!.PostToolUse![0].matcher).toBe('Edit|MultiEdit|Write');
     expect(settings.hooks!.PostToolUse![0].hooks[0].type).toBe('command');
     expect(settings.hooks!.PostToolUse![0].hooks[0].command).toContain('ai-guard');
     expect(settings.hooks!.PostToolUse![0].hooks[0].command).toContain('claude-hook');
+    // Stop and SessionStart have no matcher support.
+    expect(settings.hooks!.Stop).toEqual([{ hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' }] }]);
+    expect(settings.hooks!.SessionStart).toEqual([{ hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' }] }]);
+    expect(settings.hooks!.PreToolUse).toEqual([{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' }] }]);
+  });
+
+  it('can skip the Stop/SessionStart hooks and the Bash guard', () => {
+    const { settings, added } = mergeAiGuardHook({}, { stopHook: false, bashGuard: false });
+    expect(added).toEqual(['PostToolUse']);
+    expect(settings.hooks!.Stop).toBeUndefined();
+    expect(settings.hooks!.PreToolUse).toBeUndefined();
   });
 
   it('adds hook when hooks object exists but has no PostToolUse', () => {
@@ -150,7 +162,7 @@ describe('init-claude: mergeAiGuardHook', () => {
     // Original matcher preserved
     expect(settings.hooks!.PostToolUse![0].matcher).toBe('Bash');
     // New matcher added
-    expect(settings.hooks!.PostToolUse![1].matcher).toBe('Edit|Write');
+    expect(settings.hooks!.PostToolUse![1].matcher).toBe('Edit|MultiEdit|Write');
   });
 
   it('appends to existing Edit|Write matcher that has no AI Guard hook', () => {
@@ -175,7 +187,16 @@ describe('init-claude: mergeAiGuardHook', () => {
     expect(settings.hooks!.PostToolUse![0].hooks[1].command).toContain('ai-guard');
   });
 
-  it('is idempotent: returns changed=false when hook already exists', () => {
+  it('is idempotent: returns changed=false when every hook already exists', () => {
+    const once = mergeAiGuardHook({}).settings;
+    const { settings, changed, added } = mergeAiGuardHook(once);
+
+    expect(changed).toBe(false);
+    expect(added).toEqual([]);
+    expect(settings).toEqual(once);
+  });
+
+  it('keeps a legacy Edit|Write hook and adds only the missing events', () => {
     const input = {
       hooks: {
         PostToolUse: [
@@ -189,11 +210,19 @@ describe('init-claude: mergeAiGuardHook', () => {
       },
     };
 
-    const { settings, changed } = mergeAiGuardHook(input);
+    const { settings, added } = mergeAiGuardHook(input);
 
-    expect(changed).toBe(false);
+    expect(added).toEqual(['SessionStart', 'Stop', 'PreToolUse']);
     expect(settings.hooks!.PostToolUse).toHaveLength(1);
+    expect(settings.hooks!.PostToolUse![0].matcher).toBe('Edit|Write');
     expect(settings.hooks!.PostToolUse![0].hooks).toHaveLength(1);
+  });
+
+  it('appends to an existing Bash PreToolUse matcher instead of duplicating it', () => {
+    const input = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo test' }] }] } };
+    const { settings } = mergeAiGuardHook(input);
+    expect(settings.hooks!.PreToolUse).toHaveLength(1);
+    expect(settings.hooks!.PreToolUse![0].hooks.map((h) => h.command)).toEqual(['echo test', 'node_modules/.bin/ai-guard claude-hook']);
   });
 
   it('does not mutate the original settings object', () => {

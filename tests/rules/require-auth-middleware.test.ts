@@ -1,4 +1,6 @@
 import { ruleTester } from '../helpers/rule-tester';
+import { describe, it, expect } from 'vitest';
+import { Linter } from 'eslint';
 import { requireAuthMiddleware } from '../../src/rules/security/require-auth-middleware';
 
 ruleTester.run('require-auth-middleware', requireAuthMiddleware, {
@@ -175,4 +177,127 @@ ruleTester.run('require-auth-middleware (C3: per-router auth tracking)', require
       ],
     },
   ],
+});
+// ─── Public-route matching is segment-exact, not prefix-based ────────────────
+
+ruleTester.run('require-auth-middleware (public route segments)', requireAuthMiddleware, {
+  valid: [
+    // Versioned / prefixed public routes
+    { code: `router.get('/api/health', healthHandler);` },
+    { code: `router.post('/api/v1/login', loginHandler);` },
+    { code: `app.post('/v2/auth/refresh', refreshHandler);` },
+    { code: `app.get('/healthz', probe);` },
+    { code: `router.post('/reset-password', resetPassword);` },
+    { code: `app.get('/favicon.ico', serveIcon);` },
+    { code: `app.get('/.well-known/openid-configuration', serveOidc);` },
+    // Nested segment under a public root
+    { code: `router.post('/auth/login', loginHandler);` },
+  ],
+  invalid: [
+    // Lookalikes: the old prefix match treated these as public
+    { code: `router.get('/authors/:id', getAuthor);`, errors: [{ messageId: 'missingAuth' }] },
+    { code: `router.delete('/publications/:id', deletePublication);`, errors: [{ messageId: 'missingAuth' }] },
+    { code: `router.put('/devices/:id', updateDevice);`, errors: [{ messageId: 'missingAuth' }] },
+    { code: `router.post('/livestreams', createStream);`, errors: [{ messageId: 'missingAuth' }] },
+    { code: `router.get('/statuses/:id', getStatus);`, errors: [{ messageId: 'missingAuth' }] },
+    // Debug/internal endpoints in a production router are not public
+    { code: `app.get('/debug/env', dumpEnv);`, errors: [{ messageId: 'missingAuth' }] },
+    { code: `router.post('/internal/users/:id/promote', promoteUser);`, errors: [{ messageId: 'missingAuth' }] },
+    // A public word deeper in the path does not make the route public
+    { code: `router.get('/api/users/health', getUserHealth);`, errors: [{ messageId: 'missingAuth' }] },
+    // API index is not a known public route
+    { code: `app.get('/api/v1', apiIndex);`, errors: [{ messageId: 'missingAuth' }] },
+  ],
+});
+
+// ─── Fastify routes, hooks and member/array middleware ───────────────────────
+
+ruleTester.run('require-auth-middleware (Fastify and middleware shapes)', requireAuthMiddleware, {
+  valid: [
+    // Canonical @fastify/jwt pattern
+    { code: `fastify.get('/me', { onRequest: [fastify.authenticate] }, handler);` },
+    { code: `app.post('/orders', { preHandler: app.authenticate }, createOrder);` },
+    { code: `server.delete('/items/:id', { preValidation: [verifyToken] }, removeItem);` },
+    // Blanket Fastify hook
+    {
+      code: `
+        fastify.addHook('onRequest', fastify.authenticate);
+        fastify.get('/orders', listOrders);
+      `,
+    },
+    // Express middleware array
+    { code: `router.post('/orders', [requireAuth, validateOrder], createOrder);` },
+    // Member-expression middleware
+    { code: `router.get('/orders', auth.required, listOrders);` },
+    { code: `router.get('/orders', passport.authenticate, listOrders);` },
+    // Prefix-scoped router.use covers routes under that prefix
+    {
+      code: `
+        router.use('/admin', protect);
+        router.get('/admin/users', listUsers);
+        router.get('/admin', adminHome);
+      `,
+    },
+    // Router name ending in "Routes"
+    { code: `userRoutes.get('/users', requireAuth, listUsers);` },
+    // HTTP clients are not routers
+    { code: `api.get('/users', { params: { page: 2 } });` },
+    { code: `client.post('/orders', payload);` },
+  ],
+  invalid: [
+    // Fastify route without auth
+    { code: `fastify.get('/orders', async (request, reply) => listOrders());`, errors: [{ messageId: 'missingAuth' }] },
+    // Fastify options without an auth hook
+    { code: `fastify.post('/orders', { schema: orderSchema }, createOrder);`, errors: [{ messageId: 'missingAuth' }] },
+    // addHook with a non-auth hook function
+    {
+      code: `
+        fastify.addHook('onRequest', logRequest);
+        fastify.get('/orders', listOrders);
+      `,
+      errors: [{ messageId: 'missingAuth' }],
+    },
+    // auth.optional lets anonymous requests through
+    { code: `router.delete('/orders/:id', auth.optional, deleteOrder);`, errors: [{ messageId: 'missingAuth' }] },
+    // Middleware array without auth
+    { code: `router.post('/orders', [validateOrder, rateLimit], createOrder);`, errors: [{ messageId: 'missingAuth' }] },
+    // Prefix-scoped auth does not cover sibling routes
+    {
+      code: `
+        router.use('/admin', protect);
+        router.get('/administrators', listAdmins);
+        router.delete('/users/:id', deleteUser);
+      `,
+      errors: [{ messageId: 'missingAuth' }, { messageId: 'missingAuth' }],
+    },
+    // Auth registered AFTER a route does not protect it (Express ordering)
+    {
+      code: `
+        router.get('/orders', listOrders);
+        router.use(protect);
+      `,
+      errors: [{ messageId: 'missingAuth' }],
+    },
+    { code: `userRoutes.delete('/users/:id', deleteUser);`, errors: [{ messageId: 'missingAuth' }] },
+  ],
+});
+
+// ─── Option validation ───────────────────────────────────────────────────────
+
+describe('require-auth-middleware option validation', () => {
+  it('reports an invalid internalPathPatterns regex with the rule and option name', () => {
+    const linter = new Linter({ configType: 'flat' });
+    expect(() =>
+      linter.verify(
+        `router.get('/orders', listOrders);`,
+        [
+          {
+            plugins: { guard: { rules: { 'require-auth-middleware': requireAuthMiddleware } } },
+            rules: { 'guard/require-auth-middleware': ['error', { internalPathPatterns: ['('] }] },
+          },
+        ] as unknown as Linter.Config[],
+        'src/routes.js',
+      ),
+    ).toThrow(/require-auth-middleware: invalid regular expression in "internalPathPatterns": "\("/);
+  });
 });

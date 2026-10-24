@@ -30,6 +30,8 @@ ai-guard run
 | [`preset`](preset.md) | Interactive preset selector | To change rule severity levels |
 | [`ignore`](ignore.md) | Add default ignores to config | To suppress dist/build noise |
 | [`baseline`](baseline.md) | Save + diff issues over time | For gradual adoption |
+| `changed` | Scan only changed files (`--integrity` adds check integrity) | Pull requests and CI |
+| [`integrity`](../integrity.md) | Detect changes that weaken checks vs a base revision | Before merging agent-written changes |
 
 ---
 

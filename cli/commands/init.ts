@@ -12,7 +12,6 @@ import {
   backupConfig,
   readConfig,
   writeConfig,
-  getConfigFilePath,
   removeNukeIgnore,
   validateFlatConfigText,
   validateLegacyConfigText,
@@ -245,7 +244,6 @@ export function registerInitCommand(program: Command): void {
       log.section(`Configuring ESLint${isDryRun ? ' (dry run)' : ''}`);
 
       let finalConfigPath: string;
-      let configWritten = false;
 
       // Nuke-ignore removal — fix before anything else
       if (env.configPath && env.hasNukeIgnore) {
@@ -286,7 +284,6 @@ export function registerInitCommand(program: Command): void {
           log.success(`Created ${chalk.white(targetName)}`);
           log.info(`  Preset: ${chalk.cyan(preset)}`);
           log.info(`  Format: ${chalk.cyan(useFlat ? 'ESLint v9 flat config (eslint.config.mjs)' : 'ESLint v8 legacy config (.eslintrc.js)')}`);
-          configWritten = true;
         }
       } else if (useFlat && existingIsFlat) {
         // ── Patch existing flat config ─────────────────────────────────────────
@@ -311,7 +308,6 @@ export function registerInitCommand(program: Command): void {
             log.success(`Patched ${chalk.white(path.relative(cwd, env.configPath!))}`);
           }
           finalConfigPath = env.configPath!;
-          configWritten = true;
         }
       } else {
         // ── Patch existing legacy config ─────────────────────────────────────
@@ -330,7 +326,6 @@ export function registerInitCommand(program: Command): void {
           writeConfig(env.configPath!, patched);
           log.success(`Patched ${chalk.white(path.relative(cwd, env.configPath!))}`);
           finalConfigPath = env.configPath!;
-          configWritten = true;
         }
       }
 

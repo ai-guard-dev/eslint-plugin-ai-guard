@@ -25,6 +25,10 @@ export default defineConfig([
     target: 'node18',
     external: ['eslint', '@typescript-eslint/parser'],
     tsconfig: 'tsconfig.cli.json',
+    // CJS output has no import.meta; without the shim `import.meta.url` is
+    // undefined and the CLI cannot locate its own bundled plugin when the
+    // scanned project does not install eslint-plugin-ai-guard (npx usage).
+    shims: true,
     banner: {
       js: '#!/usr/bin/env node',
     },
@@ -43,6 +47,7 @@ export default defineConfig([
     // are bundled (they are devDependencies) so `npx` doesn't install ~90 extra packages.
     external: ['eslint', '@typescript-eslint/parser'],
     tsconfig: 'tsconfig.mcp.json',
+    shims: true,
     banner: {
       js: '#!/usr/bin/env node',
     },

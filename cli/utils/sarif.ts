@@ -40,6 +40,7 @@
  */
 
 import { createHash } from 'crypto';
+import { integritySarifRules, sarifLevelFor } from './integrity/report.js';
 import path from 'path';
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
 import { ISSUE_CONFIDENCE, ISSUE_CATEGORY, ISSUE_ASYNC_RISK_TYPE, ISSUE_REMEDIATION } from './eslint-runner.js';
@@ -84,6 +85,8 @@ interface SarifReportingDescriptor {
     category?: string;
     'security-severity'?: string;
     precision?: string;
+    /** Marks check-integrity rules (not lint rules). */
+    aiGuardIntegrity?: true;
   };
 }
 
@@ -107,6 +110,10 @@ interface SarifResult {
     category?: string;
     'security-severity'?: string;
     precision?: string;
+    /** Check-integrity results carry their tier; the Action counts them separately. */
+    aiGuardIntegrity?: true;
+    integrityTier?: 'high' | 'advisory';
+    blocking?: boolean;
   };
 }
 
@@ -573,6 +580,7 @@ export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
   const normalizedRuns = log.runs.map((run) => {
     // 1. Normalize rules
     const rules = run.tool.driver.rules.map((rule) => {
+      if (rule.properties?.aiGuardIntegrity) return rule;
       const confidence = ISSUE_CONFIDENCE[rule.id];
       const properties = rule.properties || {};
 
@@ -609,6 +617,14 @@ export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
 
     // 2. Normalize results
     const results = run.results.map((result) => {
+      if (result.properties?.aiGuardIntegrity) {
+        const high = result.properties.integrityTier === 'high';
+        return {
+          ...result,
+          kind: high ? 'fail' as const : 'informational' as const,
+          properties: { ...result.properties, precision: high ? 'high' : 'low' },
+        };
+      }
       const confidence = ISSUE_CONFIDENCE[result.ruleId];
       const properties = result.properties || {};
 
@@ -626,7 +642,7 @@ export function normalizeSarifForGitHub(log: SarifLog): SarifLog {
       }
 
       // Ensure actionable findings use kind "fail", informational hints use kind "informational"
-      const kind = confidence === 'informational' ? 'informational' : 'fail';
+      const kind: 'fail' | 'informational' = confidence === 'informational' ? 'informational' : 'fail';
 
       return {
         ...result,
@@ -687,6 +703,34 @@ export function buildSarifLog(
     }
   }
 
+  // Check-integrity findings (changed --integrity): same SARIF run, separate rules.
+  const integrity = result.integrity;
+  if (integrity?.report && integrity.report.findings.length > 0) {
+    const ids = [...new Set(integrity.report.findings.map((f) => f.ruleId))].sort();
+    rules.push(...integritySarifRules(ids));
+    for (const f of integrity.report.findings) {
+      const uri = normalizeSarifPath(f.file, repoRoot);
+      const line = Math.max(1, f.line ?? 1);
+      sarifResults.push({
+        ruleId: f.ruleId,
+        level: sarifLevelFor(f, integrity.mode),
+        kind: f.tier === 'high' ? 'fail' : 'informational',
+        message: { text: f.message },
+        partialFingerprints: { [FINGERPRINT_KEY]: generateStableFingerprint(uri, f.ruleId, line, f.message) },
+        locations: [{
+          physicalLocation: { artifactLocation: { uri }, region: { startLine: line, startColumn: 1 } },
+          message: { text: f.message },
+        }],
+        properties: {
+          category: 'Check Integrity',
+          aiGuardIntegrity: true,
+          integrityTier: f.tier,
+          blocking: integrity.mode === 'enforce' && f.blocking,
+        },
+      });
+    }
+  }
+
   const log: SarifLog = {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
     version: '2.1.0',
@@ -713,6 +757,12 @@ export function buildSarifLog(
           durationMs: result.durationMs,
           ecosystemIssuesCount: result.ecosystemIssues.length,
           parserErrorsCount: result.parserErrors.length,
+          suppressedFindingsCount: result.suppressedIssues?.length ?? 0,
+          ...(integrity ? {
+            integrityMode: integrity.mode,
+            integrityFindingsCount: integrity.report?.findings.length ?? 0,
+            ...(integrity.error ? { integrityError: integrity.error.message } : {}),
+          } : {}),
         },
       },
     ],

@@ -93,6 +93,9 @@ async function main() {
   const pmInput         = getInput('package-manager', 'auto');
   const sarifOutput     = getInput('sarif-output', 'ai-guard-results.sarif');
   const installDeps     = getInput('install-deps', 'true') === 'true';
+  const baselineFile    = getInput('baseline', '');
+  const integrity       = getInput('integrity', 'off');
+  const inlineSuppress  = getInput('inline-suppressions', '');
 
   const cwd = path.resolve(workingDir);
 
@@ -134,6 +137,29 @@ async function main() {
   }
 
   cliArgs.push('--fail-on', failOn);
+
+  // Baseline filtering applies to PR (changed-only) scans; full scans keep
+  // reporting everything so the baseline itself stays visible.
+  if (changedOnly && baselineFile) {
+    cliArgs.push('--baseline', baselineFile);
+  } else if (baselineFile) {
+    warn('The baseline input only applies when changed-only is true — ignoring it for this full scan.');
+  }
+
+  // Check integrity compares the PR with its base, so it needs changed-only mode.
+  if (!['off', 'report', 'enforce'].includes(integrity)) {
+    error(`Invalid integrity input '${integrity}'. Use off, report or enforce.`);
+    process.exit(1);
+    return;
+  }
+  if (integrity !== 'off' && changedOnly) {
+    cliArgs.push('--integrity', integrity);
+  } else if (integrity !== 'off') {
+    warn('The integrity input only applies when changed-only is true — ignoring it for this full scan.');
+  }
+  if (inlineSuppress) {
+    cliArgs.push('--inline-suppressions', inlineSuppress);
+  }
   cliArgs.push('--sarif-output', sarifOutputPath);
   cliArgs.push('--sarif');
 
@@ -165,6 +191,8 @@ async function main() {
   let issuesFound = 0;
   let highCount = 0;
   let mediumCount = 0;
+  let integrityHigh = 0;
+  let integrityAdvisory = 0;
   let filesScanned = 0;
   let durationMs = 0;
 
@@ -174,10 +202,16 @@ async function main() {
       const runs = sarif.runs ?? [];
       for (const run of runs) {
         const results = run.results ?? [];
-        issuesFound += results.length;
 
-        // Count confidence levels from SARIF result properties.precision
+        // Count confidence levels from SARIF result properties.precision.
+        // Check-integrity results are counted separately from lint findings.
         for (const result of results) {
+          if (result.properties?.aiGuardIntegrity) {
+            if (result.properties.integrityTier === 'high') integrityHigh++;
+            else integrityAdvisory++;
+            continue;
+          }
+          issuesFound++;
           const precision = result.properties?.precision;
           if (precision === 'high') {
             highCount++;
@@ -219,6 +253,10 @@ async function main() {
   setOutput('medium-confidence-count', String(mediumCount));
   setOutput('files-scanned', String(filesScanned));
   setOutput('duration-ms', String(durationMs));
+  if (integrity !== 'off' && changedOnly) {
+    setOutput('integrity-high-count', String(integrityHigh));
+    setOutput('integrity-advisory-count', String(integrityAdvisory));
+  }
 
   // ── Exit with correct code ────────────────────────────────────────────────
   // The CLI already exited with the right code via process.exit.
@@ -227,7 +265,7 @@ async function main() {
   // that must be treated as a failure, not a success.
   const exitStatus = result.status;
   if (exitStatus !== 0) {
-    if (failOn === 'none') {
+    if (failOn === 'none' && !(integrity === 'enforce' && changedOnly)) {
       // Report-only mode — never fail the workflow
       info('fail-on: none — findings reported but not failing build.');
       process.exit(0);

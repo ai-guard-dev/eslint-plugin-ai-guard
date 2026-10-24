@@ -59,6 +59,21 @@ inputs:
     default: 'true'
     required: false
 
+  baseline:
+    description: 'Path to a committed baseline file (e.g. .ai-guard-baseline.json). When set and changed-only is true, only findings not recorded in the baseline are reported, annotated and uploaded. Requires eslint-plugin-ai-guard >= 1.4.3.'
+    default: ''
+    required: false
+
+  integrity:
+    description: 'Check integrity — detect changes that weaken checks (new suppressions, skipped/removed tests, lowered ESLint/TypeScript/coverage settings, removed CI steps): off | report | enforce. "enforce" fails on high-confidence findings even when fail-on is none. Requires changed-only and full history (actions/checkout fetch-depth: 0). Requires eslint-plugin-ai-guard >= 1.4.3.'
+    default: 'off'
+    required: false
+
+  inline-suppressions:
+    description: 'How inline eslint-disable directives covering AI Guard findings are treated: allow (default; hidden findings are still listed) | require-reason | ignore. Requires eslint-plugin-ai-guard >= 1.4.3.'
+    default: ''
+    required: false
+
 # ─── Outputs ──────────────────────────────────────────────────────────────────
 
 outputs:
@@ -85,6 +100,14 @@ outputs:
   duration-ms:
     description: 'Scan duration in milliseconds'
     value: ${{ steps.run-ai-guard.outputs.duration-ms }}
+
+  integrity-high-count:
+    description: 'High-confidence check-integrity findings (only when integrity is report or enforce)'
+    value: ${{ steps.run-ai-guard.outputs.integrity-high-count }}
+
+  integrity-advisory-count:
+    description: 'Advisory check-integrity findings (only when integrity is report or enforce)'
+    value: ${{ steps.run-ai-guard.outputs.integrity-advisory-count }}
 
 # ─── Implementation ───────────────────────────────────────────────────────────
 

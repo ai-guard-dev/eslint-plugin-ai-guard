@@ -454,4 +454,131 @@ describe('Action preset forwarding', () => {
     expect(aiGuardCall!.args).not.toContain('--strict');
     expect(aiGuardCall!.args).not.toContain('--security');
   });
-});
+});
+describe('baseline input', () => {
+  beforeEach(() => {
+    vi.spyOn(require('child_process'), 'execSync').mockImplementation(() => '');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const findAiGuardCall = (calls: Awaited<ReturnType<typeof runEntrypoint>>['calls']) =>
+    calls.find((c) => c.args.includes('ai-guard'));
+
+  it('passes --baseline as a single argument for changed-only scans', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'true',
+      INPUT_INSTALL_DEPS: 'false',
+      INPUT_BASELINE: 'config/ai guard baseline.json',
+    });
+
+    const args = findAiGuardCall(calls)!.args;
+    expect(args).toContain('changed');
+    const idx = args.indexOf('--baseline');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('config/ai guard baseline.json');
+  });
+
+  it('omits --baseline when the input is not set', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'true',
+      INPUT_INSTALL_DEPS: 'false',
+    });
+
+    expect(findAiGuardCall(calls)!.args).not.toContain('--baseline');
+  });
+
+  it('ignores the baseline input for full scans', async () => {
+    const { calls } = await runEntrypoint({
+      INPUT_CHANGED_ONLY: 'false',
+      INPUT_INSTALL_DEPS: 'false',
+      INPUT_BASELINE: '.ai-guard-baseline.json',
+    });
+
+    const args = findAiGuardCall(calls)!.args;
+    expect(args).toContain('run');
+    expect(args).not.toContain('--baseline');
+  });
+});
+
+describe('integrity and inline-suppressions inputs', () => {
+  beforeEach(() => {
+    vi.spyOn(require('child_process'), 'execSync').mockImplementation(() => '');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const aiGuardArgs = (calls: Awaited<ReturnType<typeof runEntrypoint>>['calls']) =>
+    calls.find((c) => c.args.includes('ai-guard'))!.args;
+
+  /** Run the entrypoint and return the FIRST process.exit code (the stub does not stop execution). */
+  async function firstExit(env: Record<string, string>): Promise<number | null> {
+    let first: number | null = null;
+    const originalExit = process.exit;
+    (process as any).exit = (c?: number) => { if (first === null) first = c ?? 0; };
+    const savedEnv = { ...process.env };
+    Object.assign(process.env, env);
+    try {
+      const entrypointPath = path.resolve(__dirname, '../../action/entrypoint.js');
+      delete require.cache[entrypointPath];
+      await new Promise<void>((resolve) => { require(entrypointPath); setTimeout(resolve, 100); });
+    } finally {
+      process.env = savedEnv;
+      (process as any).exit = originalExit;
+    }
+    return first;
+  }
+
+  it('passes --integrity for changed-only scans and leaves it out by default', async () => {
+    const enforced = await runEntrypoint({ INPUT_CHANGED_ONLY: 'true', INPUT_INSTALL_DEPS: 'false', INPUT_INTEGRITY: 'enforce' });
+    const args = aiGuardArgs(enforced.calls);
+    expect(args[args.indexOf('--integrity') + 1]).toBe('enforce');
+
+    const defaults = await runEntrypoint({ INPUT_CHANGED_ONLY: 'true', INPUT_INSTALL_DEPS: 'false' });
+    expect(aiGuardArgs(defaults.calls)).not.toContain('--integrity');
+  });
+
+  it('ignores integrity for full scans and rejects unknown values', async () => {
+    const full = await runEntrypoint({ INPUT_CHANGED_ONLY: 'false', INPUT_INSTALL_DEPS: 'false', INPUT_INTEGRITY: 'report' });
+    expect(aiGuardArgs(full.calls)).not.toContain('--integrity');
+
+    expect(await firstExit({ INPUT_CHANGED_ONLY: 'true', INPUT_INSTALL_DEPS: 'false', INPUT_INTEGRITY: 'strict' })).toBe(1);
+  });
+
+  it('passes inline-suppressions through', async () => {
+    const { calls } = await runEntrypoint({ INPUT_CHANGED_ONLY: 'true', INPUT_INSTALL_DEPS: 'false', INPUT_INLINE_SUPPRESSIONS: 'require-reason' });
+    const args = aiGuardArgs(calls);
+    expect(args[args.indexOf('--inline-suppressions') + 1]).toBe('require-reason');
+  });
+
+  it('counts integrity results separately and lets enforce fail even with fail-on none', async () => {
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ai-guard-action-'));
+    const sarifPath = path.join(dir, 'out.sarif');
+    const outputPath = path.join(dir, 'outputs.txt');
+    fs.writeFileSync(outputPath, '');
+    fs.writeFileSync(sarifPath, JSON.stringify({ runs: [{ properties: { filesScanned: 2 }, results: [
+      { ruleId: 'ai-guard/no-empty-catch', properties: { precision: 'high' } },
+      { ruleId: 'ai-guard/integrity-test-skipped', properties: { aiGuardIntegrity: true, integrityTier: 'high', precision: 'high' } },
+      { ruleId: 'ai-guard/integrity-assertions-reduced', properties: { aiGuardIntegrity: true, integrityTier: 'advisory', precision: 'low' } },
+    ] }] }));
+    vi.spyOn(require('child_process'), 'spawnSync').mockImplementation(() => ({ status: 1, signal: null, stdout: '', stderr: '' }));
+    try {
+      const code = await firstExit({
+        INPUT_CHANGED_ONLY: 'true', INPUT_INSTALL_DEPS: 'false', INPUT_INTEGRITY: 'enforce', INPUT_FAIL_ON: 'none',
+        INPUT_WORKING_DIRECTORY: dir, INPUT_SARIF_OUTPUT: sarifPath, GITHUB_OUTPUT: outputPath,
+      });
+      const outputs = fs.readFileSync(outputPath, 'utf8');
+      expect(outputs).toContain('issues-found=1\n');
+      expect(outputs).toContain('high-confidence-count=1\n');
+      expect(outputs).toContain('integrity-high-count=1\n');
+      expect(outputs).toContain('integrity-advisory-count=1\n');
+      expect(code).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

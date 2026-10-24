@@ -283,7 +283,7 @@ describe('ai_guard_scan_diff', () => {
     // May or may not have changes depending on working tree state
     expect(Array.isArray(result.issues)).toBe(true);
     expect(typeof result.durationMs).toBe('number');
-  });
+  }, 60000); // scans this repository's uncommitted changes, so duration depends on the working tree
 
   it('rejects shell injection in base ref', async () => {
     const result = await scanDiff({
@@ -324,7 +324,7 @@ describe('ai_guard_scan_diff', () => {
         fs.unlinkSync(untrackedFile);
       }
     }
-  });
+  }, 60000);
 });
 
 // ─── Untracked differential scanning tests (getChangedFiles) ──────────────────

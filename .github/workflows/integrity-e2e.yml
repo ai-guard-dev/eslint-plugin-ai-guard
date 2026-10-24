@@ -1,0 +1,97 @@
+# End-to-end check of check-integrity in a real GitHub Actions environment:
+#  - the Action (uses: ./) with integrity: report, wired to the CLI built from this commit
+#  - every output (SARIF, JSON, Action outputs) describes the same findings
+#  - a shallow clone without a merge base makes `--integrity enforce` exit 2, never pass
+
+name: Integrity E2E
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ['release/**']
+
+permissions:
+  contents: read
+
+jobs:
+  action-full-history:
+    name: Action with full history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build
+      - name: Point node_modules/.bin/ai-guard at this build
+        # Otherwise the Action falls back to `npx eslint-plugin-ai-guard` (the published version).
+        run: |
+          mkdir -p node_modules/.bin
+          printf '#!/bin/sh\nexec node "%s/dist/cli/index.js" "$@"\n' "$GITHUB_WORKSPACE" > node_modules/.bin/ai-guard
+          chmod +x node_modules/.bin/ai-guard
+      - name: Run the AI Guard Action
+        id: guard
+        uses: ./
+        env:
+          # On push events there is no PR base; compare with main explicitly.
+          GITHUB_BASE_REF: ${{ github.base_ref || 'main' }}
+        with:
+          changed-only: 'true'
+          integrity: report
+          fail-on: none
+          install-deps: 'false'
+          sarif-output: ai-guard-results.sarif
+      - name: Same findings in SARIF, JSON and Action outputs
+        env:
+          HIGH: ${{ steps.guard.outputs.integrity-high-count }}
+          ADVISORY: ${{ steps.guard.outputs.integrity-advisory-count }}
+        run: |
+          node dist/cli/index.js changed --base main --integrity report --json --fail-on none > changed.json || true
+          node - <<'EOF'
+          const fs = require('fs');
+          const sarif = JSON.parse(fs.readFileSync('ai-guard-results.sarif', 'utf8'));
+          const json = JSON.parse(fs.readFileSync('changed.json', 'utf8'));
+          const integ = sarif.runs[0].results.filter((r) => r.properties && r.properties.aiGuardIntegrity);
+          const sarifIds = integ.map((r) => `${r.ruleId}:${r.locations[0].physicalLocation.artifactLocation.uri}`).sort();
+          const jsonIds = json.integrity.findings.map((f) => `${f.ruleId}:${f.file}`).sort();
+          console.log('SARIF integrity results:', sarifIds);
+          console.log('JSON integrity findings:', jsonIds);
+          console.log('Action outputs: high=%s advisory=%s', process.env.HIGH, process.env.ADVISORY);
+          const high = integ.filter((r) => r.properties.integrityTier === 'high').length;
+          const fail = (m) => { console.error('::error::' + m); process.exit(1); };
+          if (JSON.stringify(sarifIds) !== JSON.stringify(jsonIds)) fail('SARIF and JSON integrity findings differ');
+          if (String(high) !== process.env.HIGH) fail(`integrity-high-count ${process.env.HIGH} != SARIF ${high}`);
+          if (String(integ.length - high) !== process.env.ADVISORY) fail('integrity-advisory-count differs from SARIF');
+          if (json.integrity.mode !== 'report' || json.integrity.error) fail('integrity did not run in report mode');
+          console.log('consistent');
+          EOF
+
+  shallow-clone:
+    name: Missing base commit (shallow clone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build
+      - name: enforce exits 2 with an actionable error instead of passing
+        run: |
+          set +e
+          node dist/cli/index.js changed --base main --integrity enforce --json --fail-on none > out.json
+          code=$?
+          set -e
+          cat out.json | head -c 2000; echo
+          echo "exit code: $code"
+          test "$code" = "2"
+          node -e "const j=require('./out.json'); const c=j.integrity&&j.integrity.error&&j.integrity.error.code; console.log('error code:', c); if(!['BASE_NOT_FOUND','NO_MERGE_BASE'].includes(c)) process.exit(1)"
+      - name: report mode keeps the lint exit code and says why integrity did not run
+        run: |
+          node dist/cli/index.js changed --base main --integrity report --fail-on none

@@ -120,21 +120,68 @@ jobs:
 
 ### Baseline mode (adopt incrementally)
 
-Track only new issues introduced after a baseline snapshot. Useful for
-onboarding ai-guard onto a codebase with existing issues.
+Report only issues introduced after a baseline snapshot. Useful for
+onboarding ai-guard onto a codebase with existing issues: PRs that touch
+legacy files fail only on what they add.
+
+Create the baseline once, locally, and commit it:
+
+```bash
+npx ai-guard baseline --save        # writes .ai-guard-baseline.json
+git add .ai-guard-baseline.json
+```
+
+Then filter PR scans against it — with the Action:
 
 ```yaml
-- name: Save baseline (run once to establish)
-  run: npx ai-guard baseline save
+- uses: ai-guard-dev/eslint-plugin-ai-guard@v1
+  with:
+    changed-only: 'true'
+    baseline: .ai-guard-baseline.json
+```
 
-- name: Scan against baseline
+or with the CLI:
+
+```yaml
+- name: Scan changed files against baseline
   run: |
-    npx ai-guard run \
-      --strict \
+    npx ai-guard changed --pr --baseline \
       --sarif \
       --sarif-output results.sarif
-  # Only new issues (not in baseline) will appear
+  # Annotations, the step summary, SARIF and the exit code cover only
+  # findings that are not recorded in the baseline.
 ```
+
+Do not run `ai-guard baseline --save` in the same job: it would record the
+PR's new findings as existing ones. `ai-guard run` does not read the baseline;
+use `ai-guard baseline --check` for a full-project comparison. A missing or
+corrupt baseline file makes `changed --baseline` exit with code `2` instead of
+silently reporting everything (or nothing).
+
+### Check integrity (fail PRs that weaken checks)
+
+Detect PRs that skip or delete tests, add `eslint-disable`/`@ts-ignore`, lower coverage thresholds or TypeScript strictness, or remove CI steps ([details](integrity.md)). Integrity compares the PR with its merge-base, so check out full history:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+
+- uses: ai-guard-dev/eslint-plugin-ai-guard@v1
+  with:
+    changed-only: 'true'
+    integrity: enforce        # or: report (never fails)
+```
+
+or with the CLI:
+
+```yaml
+- run: npx ai-guard changed --pr --integrity enforce --sarif --sarif-output results.sarif
+```
+
+High-confidence findings fail the job in `enforce` mode (even with `fail-on: none`); advisory findings appear as notices and never fail it. Findings are annotated on the PR, listed in the step summary, uploaded in the same SARIF run (`properties.aiGuardIntegrity`), and counted in the `integrity-high-count` / `integrity-advisory-count` outputs. If the base cannot be resolved (shallow clone), `enforce` exits with code 2 instead of passing.
+
+To accept an intended weakening, run `npx ai-guard integrity --base main --accept <fingerprint>` locally (the `#…` value shown for the finding) and commit `.ai-guard-baseline.json`; `--accept` is refused in CI, and the PR that adds the acceptance shows it as an advisory finding.
 
 ### Security-only scan
 
