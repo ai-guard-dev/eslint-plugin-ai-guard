@@ -14,8 +14,10 @@ ai-guard baseline [options]
 
 | Option | Default | Description |
 |---|---|---|
-| `--save` | auto | Save current issues to `.ai-guard-baseline.json` |
-| `--check` | auto | Compare current scan with baseline and show only new issues |
+| `create` (or `save`, `--save`) | auto | Save current issues to `.ai-guard-baseline.json` (format `version: 1`) |
+| `check` (or `--check`) | auto | Compare current scan with baseline and show only new issues |
+| `--fail-on <level>` | any new finding | `check`: `errors`, `high`, `medium`, `any` or `none`, applied to new findings only |
+| `--json` | off | JSON output; errors as `{ "error": { "code", "message" } }` |
 | `--mode <name>` | `stable` | Match mode: `stable` (file+rule+message) or `strict` (includes line/column) |
 | `--path <target>` | `.` | Directory or file to scan |
 | `--preset <name>` | `recommended` for save; the baseline's preset for check | `recommended`, `strict`, `security`, or `agent` |

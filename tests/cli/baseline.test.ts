@@ -219,3 +219,41 @@ describe('loadBaseline', () => {
     }
   });
 });
+
+describe('filterBaselinedIssues: moved files', () => {
+  const gone = (p: string): boolean => !p.includes('deleted');
+  const base = (): BaselineFile => buildBaseline(
+    makeResult({ 'old/deleted/legacy.js': [issue('r', 2)], 'src/b.js': [] }), 'recommended', 'stable');
+
+  it('never lets a vanished file hide a new finding in a file the baseline already knows', () => {
+    const baseline = buildBaseline(makeResult({ 'old/deleted/a.js': [issue('r', 2)], 'src/b.js': [issue('x', 1)] }), 'recommended', 'stable');
+    const { result, movedMatches } = filterBaselinedIssues(
+      makeResult({ 'src/b.js': [issue('x', 1), issue('r', 9)] }), baseline, { fileExists: gone });
+    expect(movedMatches).toBe(0);
+    expect(result.files[0].issues.map((i) => i.ruleId)).toEqual(['r']);
+  });
+
+  it('never matches a new file with a different file name', () => {
+    const { result, movedMatches } = filterBaselinedIssues(
+      makeResult({ 'src/brand-new.js': [issue('r', 2)] }), base(), { fileExists: gone });
+    expect(movedMatches).toBe(0);
+    expect(result.totalIssues).toBe(1);
+  });
+
+  it('matches a moved file one-to-one: extra identical findings stay new', () => {
+    const { result, movedMatches } = filterBaselinedIssues(
+      makeResult({ 'lib/legacy.js': [issue('r', 2), issue('r', 7)] }), base(), { fileExists: gone });
+    expect(movedMatches).toBe(1);
+    expect(result.files[0].issues.map((i) => i.line)).toEqual([7]);
+  });
+
+  it('is deterministic when several new files share the moved file name', () => {
+    const run = (order: string[]) => filterBaselinedIssues(
+      makeResult(Object.fromEntries(order.map((p) => [p, [issue('r', 2)]]))), base(), { fileExists: gone });
+    for (const order of [['b/legacy.js', 'a/legacy.js'], ['a/legacy.js', 'b/legacy.js']]) {
+      const { result, movedMatches } = run(order);
+      expect(movedMatches).toBe(1);
+      expect(result.files.map((f) => f.filePath)).toEqual(['b/legacy.js']);
+    }
+  });
+});
