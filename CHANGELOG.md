@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [1.4.3] — unreleased
 
+### Added — baseline
+- `ai-guard baseline create` and `ai-guard baseline check` subcommands (`save`, `--save` and `--check` keep working; `save` is an alias of `create`).
+- `baseline check --fail-on <errors|high|medium|any|none>` applies the usual failure policy to new findings only. Without it, any new finding still exits 1, as before.
+- `baseline create|check --json` output (`newIssues`, `newErrors`, `newWarnings`, `matched`, `movedMatches`, `files`); errors are reported as `{ "error": { "code", "message" } }` with exit 1 (`BASELINE_MISSING`, `BASELINE_INVALID`, …).
+- Baseline files carry `"version": 1`. Files without a version are read as version 1; a newer version is rejected with an upgrade message instead of being misread.
+- Moved files: findings recorded for a file that no longer exists can match the same rule and message in a file with the **same file name at a path the baseline does not know** (one-to-one, in path/line order), so moving a file to another directory does not turn its existing findings into new ones. Findings in files the baseline already records are never matched this way, and renamed files (new file name) report their findings as new. Applies to `changed --baseline` too.
+- A baseline written by a newer ai-guard (`version` above 1) is never overwritten, not even by `baseline create`; an unknown stored `preset` makes the file invalid instead of silently falling back to `recommended`.
+- New findings in `baseline check` output show their rule ID next to the severity.
+
 ### Added — check integrity
 - **`ai-guard integrity`** detects changes that weaken the checks a codebase relies on, relative to a base revision (`HEAD` by default, `--base <ref>` for a branch merge-base, `--staged` for the index). Only weakenings introduced by the change are reported. Covered:
   - new or broadened `eslint-disable` directives and inline `/* eslint rule: off */`

@@ -17,6 +17,13 @@ import type { Preset, RunResult } from './eslint-runner.js';
 
 export const BASELINE_FILE = '.ai-guard-baseline.json';
 
+/**
+ * Baseline file format version. Files without `version` were written before
+ * versioning and are read as version 1; a newer version is rejected rather
+ * than misread.
+ */
+export const BASELINE_VERSION = 1;
+
 export interface BaselineIssue {
   ruleId: string;
   message: string;
@@ -41,6 +48,8 @@ export interface IntegrityAcceptance {
 }
 
 export interface BaselineFile {
+  /** File format version (see BASELINE_VERSION); absent in older files. */
+  version?: number;
   createdAt: string;
   preset: Preset;
   mode: BaselineMode;
@@ -55,7 +64,8 @@ export interface BaselineFile {
 
 export type LoadBaselineResult =
   | { status: 'missing' }
-  | { status: 'invalid'; reason: string }
+  /** `newerVersion`: written by a newer ai-guard — must not be overwritten. */
+  | { status: 'invalid'; reason: string; newerVersion?: true }
   | { status: 'ok'; baseline: BaselineFile };
 
 export interface BaselineFilterResult {
@@ -63,12 +73,15 @@ export interface BaselineFilterResult {
   result: RunResult;
   /** Number of current findings matched by a baseline entry. */
   suppressed: number;
+  /** Of those, findings matched to a baseline entry recorded under a file path that no longer exists (moved/renamed file). */
+  movedMatches: number;
 }
 
 // ─── File I/O ─────────────────────────────────────────────────────────────────
 
 export function buildBaseline(result: RunResult, preset: Preset, mode: BaselineMode): BaselineFile {
   return {
+    version: BASELINE_VERSION,
     createdAt: new Date().toISOString(),
     preset,
     mode,
@@ -105,7 +118,11 @@ export function loadBaseline(baselinePath: string): LoadBaselineResult {
   }
 
   const reason = validateBaselineShape(parsed);
-  if (reason) return { status: 'invalid', reason };
+  if (reason) {
+    const version = (parsed as { version?: unknown } | null)?.version;
+    const newerVersion = typeof version === 'number' && Number.isInteger(version) && version > BASELINE_VERSION;
+    return { status: 'invalid', reason, ...(newerVersion ? { newerVersion: true as const } : {}) };
+  }
 
   const baseline = parsed as BaselineFile;
   // Baselines written before `mode` existed used exact (strict) matching.
@@ -114,7 +131,16 @@ export function loadBaseline(baselinePath: string): LoadBaselineResult {
 
 function validateBaselineShape(value: unknown): string | null {
   if (!value || typeof value !== 'object') return 'expected a JSON object';
-  const { entries, mode } = value as { entries?: unknown; mode?: unknown };
+  const { entries, mode, version, preset } = value as { entries?: unknown; mode?: unknown; version?: unknown; preset?: unknown };
+  if (version !== undefined && (typeof version !== 'number' || !Number.isInteger(version) || version < 1)) {
+    return `unknown "version" ${JSON.stringify(version)}`;
+  }
+  if (typeof version === 'number' && version > BASELINE_VERSION) {
+    return `baseline format version ${version} is newer than this ai-guard supports (${BASELINE_VERSION}); upgrade eslint-plugin-ai-guard or re-create the baseline`;
+  }
+  if (preset !== undefined && !['recommended', 'strict', 'security', 'agent'].includes(preset as string)) {
+    return `unknown preset ${JSON.stringify(preset)} (expected recommended, strict, security or agent)`;
+  }
   if (mode !== undefined && mode !== 'strict' && mode !== 'stable') {
     return `unknown mode ${JSON.stringify(mode)} (expected "strict" or "stable")`;
   }
@@ -206,12 +232,36 @@ function issueKey(mode: BaselineMode, filePath: string, issue: BaselineIssue): s
     : `${file}::${issue.ruleId}::${issue.line}::${issue.column}::${issue.message}`;
 }
 
+/** `fileName::rule::message` key used to re-match findings of a moved file. */
+function movedKey(filePath: string, issue: BaselineIssue): string {
+  return `${path.posix.basename(normalizePath(filePath))}::${issue.ruleId}::${issue.message}`;
+}
+
+export interface FilterOptions {
+  /**
+   * Whether a baseline file path still exists (paths are relative to the
+   * scan's cwd). Entries of files that no longer exist can match findings in
+   * other files by rule and message, so moving or renaming a file does not
+   * turn its existing findings into new ones. Defaults to checking the disk.
+   */
+  fileExists?: (filePath: string) => boolean;
+}
+
 /**
  * Remove findings already recorded in the baseline. Each baseline entry
  * matches at most one current finding; surplus findings are new.
+ *
+ * Pass 1 matches by file + rule + message (+ line/column in strict mode).
+ * Pass 2 lets the still-unused entries of files that no longer exist match
+ * remaining findings by rule + message only (moved/renamed files).
  */
-export function filterBaselinedIssues(result: RunResult, baseline: BaselineFile): BaselineFilterResult {
+export function filterBaselinedIssues(
+  result: RunResult,
+  baseline: BaselineFile,
+  options: FilterOptions = {},
+): BaselineFilterResult {
   const mode = baseline.mode;
+  const fileExists = options.fileExists ?? ((f: string) => fs.existsSync(path.resolve(f)));
   const remaining = new Map<string, number>();
   for (const entry of baseline.entries) {
     for (const issue of entry.issues) {
@@ -221,6 +271,7 @@ export function filterBaselinedIssues(result: RunResult, baseline: BaselineFile)
   }
 
   let suppressed = 0;
+  const pending: Array<{ file: RunResult['files'][number]; unmatched: RunResult['files'][number]['issues'] }> = [];
   let totalErrors = 0;
   let totalWarnings = 0;
   const ruleBreakdown = new Map<string, number>();
@@ -240,7 +291,49 @@ export function filterBaselinedIssues(result: RunResult, baseline: BaselineFile)
       }
     }
     suppressed += matched.size;
-    const newIssues = file.issues.filter((issue) => !matched.has(issue));
+    const unmatched = file.issues.filter((issue) => !matched.has(issue));
+    if (unmatched.length > 0) pending.push({ file, unmatched });
+  }
+
+  // Pass 2: entries left over from files that no longer exist (moved files).
+  // To never hide a genuinely new finding, a leftover entry may only match a
+  // finding in a file whose path is NOT recorded in the baseline and whose
+  // file name equals the vanished file's name (a move to another directory).
+  // Findings in files the baseline already knows are never re-matched here.
+  const orphaned = new Map<string, number>();
+  const scanned = new Set(result.files.map((f) => normalizePath(f.filePath)));
+  const baselinePaths = new Set(baseline.entries.map((e) => normalizePath(e.filePath)));
+  for (const entry of baseline.entries) {
+    if (scanned.has(normalizePath(entry.filePath)) || fileExists(entry.filePath)) continue;
+    for (const issue of entry.issues) {
+      const key = issueKey(mode, entry.filePath, issue);
+      const left = remaining.get(key) ?? 0;
+      if (left === 0) continue;
+      remaining.set(key, left - 1);
+      const mk = movedKey(entry.filePath, issue);
+      orphaned.set(mk, (orphaned.get(mk) ?? 0) + 1);
+    }
+  }
+  let movedMatches = 0;
+
+  // Deterministic one-to-one matching: files by path, issues by position.
+  pending.sort((a, b) => normalizePath(a.file.filePath).localeCompare(normalizePath(b.file.filePath)));
+  for (const { file, unmatched } of pending) {
+    const eligible = !baselinePaths.has(normalizePath(file.filePath));
+    const ordered = [...unmatched].sort((a, b) => a.line - b.line || a.column - b.column);
+    const movedHere = new Set<(typeof unmatched)[number]>();
+    if (eligible) {
+      for (const issue of ordered) {
+        const mk = movedKey(file.filePath, issue);
+        const count = orphaned.get(mk) ?? 0;
+        if (count === 0) continue;
+        orphaned.set(mk, count - 1);
+        movedHere.add(issue);
+      }
+    }
+    movedMatches += movedHere.size;
+    const newIssues = unmatched.filter((issue) => !movedHere.has(issue));
+    suppressed += unmatched.length - newIssues.length;
     if (newIssues.length === 0) continue;
 
     const errorCount = newIssues.filter((i) => i.severity === 2).length;
@@ -269,5 +362,6 @@ export function filterBaselinedIssues(result: RunResult, baseline: BaselineFile)
       topFiles,
     },
     suppressed,
+    movedMatches,
   };
 }

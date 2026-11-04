@@ -269,7 +269,7 @@ npx ai-guard <command> [options]
 | `init` | Automatically detect environment & configure ESLint | `--preset <name>`, `--flat`, `--dry-run`, `-y, --yes` |
 | `init-context` | Generate prompt instruction files for AI coding agents | `-a, --all`, `--force`, `--dry-run`, `--rules <categories>` |
 | `doctor` | Diagnose your ESLint, parser, and plugin environment | (No options needed — prints actionable diagnostic report) |
-| `baseline` | Snapshot current issues to track only new regressions | `--save`, `--check`, `--mode <strict\|stable>`, `--preset <name>` |
+| `baseline` | Record existing findings, then report only new ones | `create`, `check`, `--fail-on <level>`, `--json`, `--mode <strict\|stable>`, `--preset <name>` |
 | `report` | Generate an interactive standalone HTML audit report | `--path <dir>`, `--preset <name>`, `--output <file>`, `--no-open`, `--json` |
 | `preset` | Interactively select and switch active preset in config | (Interactive prompt with automatic config patch & backup) |
 | `ignore` | Add standard ignore paths (`.next`, `dist`, `build`) to config | (Patches flat config or legacy ignores safely) |
@@ -295,8 +295,10 @@ npx ai-guard init-context --all
 npx ai-guard report --output ai-guard-report.html
 
 # 6. Save existing issues as baseline and only fail on new regressions
-npx ai-guard baseline --save
-npx ai-guard baseline --check
+npx ai-guard baseline create                 # writes .ai-guard-baseline.json (commit it)
+npx ai-guard baseline check                  # exit 1 if any new finding
+npx ai-guard baseline check --fail-on high   # fail only on new high-confidence findings
+npx ai-guard baseline check --json           # machine-readable new findings
 
 # 7. Fail a PR that skips tests, adds eslint-disable, or lowers coverage thresholds
 npx ai-guard changed --pr --integrity enforce
