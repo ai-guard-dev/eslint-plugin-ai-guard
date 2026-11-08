@@ -8,7 +8,7 @@ The analysis runs on your machine using the open-source [`eslint-plugin-ai-guard
 
 ## What's included
 
-- **MCP server** `ai-guard`: the `ai-guard-mcp` server from `eslint-plugin-ai-guard@1.4.2`, started with Node over local STDIO for the current project. Its dependencies are pinned in this plugin's `package-lock.json` (`eslint-plugin-ai-guard@1.4.2`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0`).
+- **MCP server** `ai-guard`: the `ai-guard-mcp` server from `eslint-plugin-ai-guard@1.4.4`, started with Node over local STDIO for the current project. Its dependencies are pinned in this plugin's `package-lock.json` (`eslint-plugin-ai-guard@1.4.4`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0`).
 - **Hooks**: findings reach Claude after each JS/TS edit, and the whole change is verified when Claude finishes. New blocking issues and weakened tests go back to Claude once; anything still open is shown to you as a one-line warning. Because plugin hooks run with the bundled rules in isolated mode, inline `eslint-disable` comments are not honored there, so an agent cannot silence a finding by adding one.
 - **Skill** `/ai-guard:verify-changes [file-or-directory] [preset]`: the scan → fix → rescan workflow. Claude can also invoke it on its own after editing JS/TS code.
 
@@ -62,7 +62,7 @@ Only a result with `status: "complete"` and `clean: true` counts as clean. A `pa
 
 ## What it runs and accesses
 
-- **Downloads:** when the plugin is installed, Claude Code installs the packages pinned in `package-lock.json` (`eslint-plugin-ai-guard@1.4.2`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0` and their dependencies) from the npm registry into the plugin's folder. Nothing is downloaded when the server starts.
+- **Downloads:** when the plugin is installed, Claude Code installs the packages pinned in `package-lock.json` (`eslint-plugin-ai-guard@1.4.4`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0` and their dependencies) from the npm registry into the plugin's folder. Nothing is downloaded when the server starts.
 - **Runs:** a local Node.js process (`node_modules/eslint-plugin-ai-guard/dist/mcp/server.js`) that talks to Claude Code over STDIO. It runs read-only `git` commands (`rev-parse`, `diff`, `merge-base`, `ls-files`) for diff scans.
 - **Reads:** JS/TS files inside the project directory Claude Code starts the server in. Paths outside it, including through symlinks, are rejected.
 - **Doesn't:** the AI Guard server makes no network requests, sends no telemetry, writes or modifies no files, loads no ESLint plugins or configuration from your project, and ignores inline `eslint-disable` comments.
