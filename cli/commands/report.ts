@@ -57,6 +57,15 @@ const RULE_META: Record<string, { description: string; category: string }> = {
   'ai-guard/no-console-in-handler': { description: 'console.log in route handlers should be a logger', category: 'AI Patterns' },
   'ai-guard/no-duplicate-logic-block': { description: 'Duplicate consecutive code blocks should be extracted', category: 'AI Patterns' },
   'ai-guard/no-dead-branch': { description: 'Always-true/false condition creates dead or unreachable code', category: 'AI Patterns' },
+  'ai-guard/no-client-exposed-secret': { description: 'Server secret reachable from client-side code', category: 'Security' },
+  'ai-guard/no-invisible-unicode': { description: 'Invisible or bidirectional Unicode hides code or text', category: 'Security' },
+  'ai-guard/no-undeclared-import': { description: 'Import of an undeclared (possibly hallucinated) package', category: 'Security' },
+  'ai-guard/no-unsanitized-html': { description: 'Dynamic value written to an HTML sink without sanitizing', category: 'Security' },
+  'ai-guard/no-silent-fallback': { description: 'Hardcoded secret fallback or swallowed failure', category: 'Reliability' },
+  'ai-guard/no-placeholder-implementation': { description: 'Placeholder, stub, or elided code left by an agent', category: 'AI Patterns' },
+  'ai-guard/no-tautological-assertion': { description: 'Assertion that passes whatever the code does', category: 'AI Patterns' },
+  'ai-guard/no-assertionless-test': { description: 'Test case that asserts nothing', category: 'AI Patterns' },
+  'ai-guard/no-test-env-branch': { description: 'Test-only shortcut that returns a canned result', category: 'AI Patterns' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -178,6 +187,15 @@ export function buildReportData(
     'ai-guard/no-console-in-handler': 'low',
     'ai-guard/no-duplicate-logic-block': 'low',
     'ai-guard/no-redundant-await': 'low',
+    'ai-guard/no-client-exposed-secret': 'high',
+    'ai-guard/no-invisible-unicode': 'high',
+    'ai-guard/no-undeclared-import': 'high',
+    'ai-guard/no-unsanitized-html': 'medium',
+    'ai-guard/no-silent-fallback': 'medium',
+    'ai-guard/no-placeholder-implementation': 'medium',
+    'ai-guard/no-tautological-assertion': 'high',
+    'ai-guard/no-assertionless-test': 'medium',
+    'ai-guard/no-test-env-branch': 'medium',
   };
   let highCount = 0;
   let mediumCount = 0;

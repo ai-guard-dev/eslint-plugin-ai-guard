@@ -17,7 +17,7 @@ describe('plugin metadata', () => {
 });
 
 describe('plugin configurations', () => {
-  it('exports agent config with exactly 5 error rules', () => {
+  it('exports agent config with exactly 8 error rules', () => {
     expect(plugin.configs).toHaveProperty('agent');
     
     const agentConfig = plugin.configs.agent;
@@ -25,14 +25,17 @@ describe('plugin configurations', () => {
     
     if (agentConfig && typeof agentConfig === 'object' && 'rules' in agentConfig) {
       const rules = agentConfig.rules as Record<string, string>;
-      expect(Object.keys(rules)).toHaveLength(5);
+      expect(Object.keys(rules)).toHaveLength(8);
       
       const expectedRules = [
         'ai-guard/no-hardcoded-secret',
         'ai-guard/no-eval-dynamic',
         'ai-guard/no-empty-catch',
         'ai-guard/no-sql-string-concat',
-        'ai-guard/no-floating-promise'
+        'ai-guard/no-floating-promise',
+        'ai-guard/no-client-exposed-secret',
+        'ai-guard/no-invisible-unicode',
+        'ai-guard/no-undeclared-import',
       ];
       
       expectedRules.forEach(rule => {

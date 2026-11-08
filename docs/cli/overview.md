@@ -30,6 +30,9 @@ ai-guard run
 | [`preset`](preset.md) | Interactive preset selector | To change rule severity levels |
 | [`ignore`](ignore.md) | Add default ignores to config | To suppress dist/build noise |
 | [`baseline`](baseline.md) | Save + diff issues over time | For gradual adoption |
+| [`verify`](verify.md) | One verdict for the current change | Before calling work done or merging |
+| [`scan-agent-config`](scan-agent-config.md) | Check agent instructions and MCP config | When adding or reviewing agent config |
+| `changed --test-integrity` ([details](test-integrity.md)) | Flag weakened tests in a change | In pull requests |
 
 ---
 

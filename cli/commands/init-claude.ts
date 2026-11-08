@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import path from 'path';
 import fs from 'fs';
 import { log } from '../utils/logger.js';
+import { AGENT_RULES } from '../../src/configs/agent.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -12,13 +13,15 @@ interface ClaudeHookEntry {
 }
 
 interface ClaudeHookMatcher {
-  matcher: string;
+  matcher?: string;
   hooks: ClaudeHookEntry[];
 }
 
 interface ClaudeSettings {
   hooks?: {
     PostToolUse?: ClaudeHookMatcher[];
+    Stop?: ClaudeHookMatcher[];
+    SessionStart?: ClaudeHookMatcher[];
     [key: string]: unknown;
   };
   [key: string]: unknown;
@@ -149,6 +152,30 @@ export function mergeAiGuardHook(
   return { settings: result, changed: true };
 }
 
+/**
+ * Merge the AI Guard Stop and SessionStart hooks. Stop verifies the session's
+ * changes before Claude finishes; SessionStart records the commit to compare with.
+ * Idempotent: events that already run the AI Guard hook are left alone.
+ */
+export function mergeAiGuardLifecycleHooks(
+  settings: ClaudeSettings,
+): { settings: ClaudeSettings; changed: boolean } {
+  const result: ClaudeSettings = JSON.parse(JSON.stringify(settings));
+  if (!result.hooks || typeof result.hooks !== 'object') result.hooks = {};
+  let changed = false;
+  for (const event of ['SessionStart', 'Stop'] as const) {
+    const groups = Array.isArray(result.hooks[event]) ? result.hooks[event]! : [];
+    if (groups.some(matcherHasAiGuard)) {
+      result.hooks[event] = groups;
+      continue;
+    }
+    groups.push({ hooks: [{ type: 'command', command: AI_GUARD_HOOK_COMMAND }] });
+    result.hooks[event] = groups;
+    changed = true;
+  }
+  return { settings: result, changed };
+}
+
 // ─── Command registration ─────────────────────────────────────────────────────
 
 export function registerInitClaudeCommand(program: Command): void {
@@ -157,7 +184,8 @@ export function registerInitClaudeCommand(program: Command): void {
     .description('Configure Claude Code PostToolUse hook for AI Guard validation')
     .option('--dry-run', 'Preview what would change without writing any files')
     .option('--local', 'Write to .claude/settings.local.json instead of settings.json')
-    .action((opts: { dryRun?: boolean; local?: boolean }) => {
+    .option('--no-stop-hook', 'Only install the PostToolUse scan; skip the Stop verification hook')
+    .action((opts: { dryRun?: boolean; local?: boolean; stopHook?: boolean }) => {
       const cwd = process.cwd();
       const isDryRun = opts.dryRun === true;
       const useLocal = opts.local === true;
@@ -220,10 +248,15 @@ export function registerInitClaudeCommand(program: Command): void {
 
       // ── Step 3: Merge hook ──────────────────────────────────────────────────
 
-      const { settings: merged, changed } = mergeAiGuardHook(existingSettings);
+      const postToolUse = mergeAiGuardHook(existingSettings);
+      const withStop = opts.stopHook === false
+        ? { settings: postToolUse.settings, changed: false }
+        : mergeAiGuardLifecycleHooks(postToolUse.settings);
+      const merged = withStop.settings;
+      const changed = postToolUse.changed || withStop.changed;
 
       if (!changed) {
-        log.success('AI Guard PostToolUse hook is already configured');
+        log.success('AI Guard hooks are already configured');
         log.blank();
         log.print(`  ${chalk.gray('No changes needed. The hook is already present in')} ${chalk.white(relPath)}`);
         log.blank();
@@ -257,20 +290,21 @@ export function registerInitClaudeCommand(program: Command): void {
 
       log.section('Setup Complete');
       log.blank();
-      log.print(`  ${chalk.green('✔')}  ${chalk.bold('Hook type:')} ${chalk.cyan('PostToolUse')}`);
+      log.print(`  ${chalk.green('✔')}  ${chalk.bold('Hooks:')} ${chalk.cyan(opts.stopHook === false ? 'PostToolUse' : 'PostToolUse, Stop, SessionStart')}`);
       log.print(`  ${chalk.green('✔')}  ${chalk.bold('Matcher:')} ${chalk.cyan(AI_GUARD_HOOK_MATCHER)}`);
       log.print(`  ${chalk.green('✔')}  ${chalk.bold('Command:')} ${chalk.cyan(AI_GUARD_HOOK_COMMAND)}`);
       log.print(`  ${chalk.green('✔')}  ${chalk.bold('Settings:')} ${chalk.cyan(relPath)}`);
       log.blank();
-      log.info('When Claude Code edits a JS/TS file, AI Guard will automatically');
-      log.info('scan it for hardcoded secrets, unsafe eval, empty catches, and SQL injection.');
+      log.info('When Claude Code edits a JS/TS file, AI Guard scans it and hands the findings to Claude.');
+      if (opts.stopHook !== false) {
+        log.info('When Claude finishes, AI Guard verifies the whole change: placeholder code, weakened or');
+        log.info('focused tests and agent-config issues go back to Claude once; anything left is shown to you.');
+      }
       log.blank();
-      log.print(`  ${chalk.gray('Rules enabled (agent preset):')}`);
-      log.print(`    ${chalk.yellow('•')} no-hardcoded-secret  ${chalk.gray('(high confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-eval-dynamic      ${chalk.gray('(high confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-empty-catch       ${chalk.gray('(high confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-sql-string-concat ${chalk.gray('(medium confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-floating-promise  ${chalk.gray('(high confidence)')}`);
+      log.print(`  ${chalk.gray('Rules on every edit (agent preset):')}`);
+      for (const rule of Object.keys(AGENT_RULES)) {
+        log.print(`    ${chalk.yellow('•')} ${rule.replace('ai-guard/', '')}`);
+      }
       log.blank();
       log.info(`To remove: delete the AI Guard hook entry from ${chalk.cyan(relPath)}`);
       log.blank();

@@ -24,6 +24,11 @@ inputs:
     default: 'true'
     required: false
 
+  test-integrity:
+    description: 'With changed-only, also flag tests the PR deleted, skipped, focused or weakened (needs fetch-depth: 0)'
+    default: 'false'
+    required: false
+
   path:
     description: 'Directory or file to scan'
     default: '.'

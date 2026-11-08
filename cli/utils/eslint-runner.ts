@@ -4,6 +4,10 @@ import { pathToFileURL, fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { log } from './logger.js';
 import { AGENT_RULES } from '../../src/configs/agent.js';
+import { virtualRules } from './check-catalog.js';
+import recommendedConfig from '../../src/configs/recommended.js';
+import strictConfig from '../../src/configs/strict.js';
+import securityConfig from '../../src/configs/security.js';
 export { AGENT_RULES };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -25,6 +29,8 @@ export interface RunOptions {
   workingDirectory?: string;
   /** Use packaged rules/parser, never load plugin code from the scanned workspace. */
   isolated?: boolean;
+  /** Rule levels merged over the preset (used by `verify` to raise its floor). */
+  rules?: Record<string, RuleLevel>;
 }
 
 export interface IssueDetail {
@@ -43,6 +49,8 @@ export interface IssueDetail {
   asyncRiskType?: string;
   /** Short remediation guidance */
   remediation?: string;
+  /** True when ESLint offers an autofix for this finding. */
+  fixable?: boolean;
 }
 
 export interface FileResult {
@@ -145,6 +153,15 @@ export const ISSUE_CONFIDENCE: Record<string, 'high' | 'medium' | 'low' | 'infor
   // INFORMATIONAL — hints only, never fail CI
   'ai-guard/no-async-without-await': 'informational', // Framework patterns (Next.js RSC, etc.) make this very noisy
   'ai-guard/no-redundant-await':     'informational', // Explicit await in return is idiomatic in many codebases
+  'ai-guard/no-client-exposed-secret': 'high',
+  'ai-guard/no-invisible-unicode': 'high',
+  'ai-guard/no-undeclared-import': 'high',
+  'ai-guard/no-unsanitized-html': 'medium',
+  'ai-guard/no-silent-fallback': 'medium',
+  'ai-guard/no-placeholder-implementation': 'medium',
+  'ai-guard/no-tautological-assertion': 'high',
+  'ai-guard/no-assertionless-test': 'medium',
+  'ai-guard/no-test-env-branch': 'medium',
 };
 
 export const ISSUE_CATEGORY: Record<string, string> = {
@@ -166,6 +183,15 @@ export const ISSUE_CATEGORY: Record<string, string> = {
   'ai-guard/no-console-in-handler':  'AI Patterns',
   'ai-guard/no-duplicate-logic-block':'AI Patterns',
   'ai-guard/no-dead-branch':         'AI Patterns',
+  'ai-guard/no-client-exposed-secret': 'Security',
+  'ai-guard/no-invisible-unicode': 'Security',
+  'ai-guard/no-undeclared-import': 'Security',
+  'ai-guard/no-unsanitized-html': 'Security',
+  'ai-guard/no-silent-fallback': 'Reliability',
+  'ai-guard/no-placeholder-implementation': 'AI Patterns',
+  'ai-guard/no-tautological-assertion': 'AI Patterns',
+  'ai-guard/no-assertionless-test': 'AI Patterns',
+  'ai-guard/no-test-env-branch': 'AI Patterns',
 };
 
 export const ISSUE_ASYNC_RISK_TYPE: Record<string, string> = {
@@ -195,10 +221,30 @@ export const ISSUE_REMEDIATION: Record<string, string> = {
   'ai-guard/no-console-in-handler':  'Replace console.log with a structured logger (pino, winston, etc.).',
   'ai-guard/no-duplicate-logic-block':'Extract the duplicated logic into a shared function.',
   'ai-guard/no-dead-branch':         'Remove the unreachable branch or fix the condition.',
+  'ai-guard/no-client-exposed-secret': 'Remove the public prefix and read the secret only in server code (API route, server action); rotate the key if it shipped.',
+  'ai-guard/no-invisible-unicode': 'Delete the invisible characters, or write them as visible escape sequences (e.g. \\u202E) if the text needs them.',
+  'ai-guard/no-undeclared-import': 'Confirm the package exists on npm and is the one you meant, then add it to package.json; otherwise fix the import.',
+  'ai-guard/no-unsanitized-html': 'Sanitize with DOMPurify.sanitize(), or render the value as text (textContent / JSX text).',
+  'ai-guard/no-silent-fallback': 'Fail at startup when a required secret is missing; log and rethrow (or return an error state) instead of returning empty data.',
+  'ai-guard/no-placeholder-implementation': 'Restore elided code and implement stubs before shipping; move mock data into test fixtures.',
+  'ai-guard/no-tautological-assertion': 'Assert on a value produced by the code under test, compared with an independent expected value.',
+  'ai-guard/no-assertionless-test': 'Add an expect(...) for the behaviour the test name describes.',
+  'ai-guard/no-test-env-branch': 'Remove the test-only shortcut; inject the dependency or mock it in the test so the real code path runs.',
 };
+
+// Virtual rules: agent-config and test-integrity checks (see check-catalog.ts).
+// They share these tables so terminal, JSON, SARIF and --fail-on treat them like rules.
+for (const [id, meta] of Object.entries(virtualRules())) {
+  ISSUE_CONFIDENCE[id] ??= meta.confidence;
+  ISSUE_CATEGORY[id] ??= meta.category;
+  ISSUE_REMEDIATION[id] ??= meta.remediation;
+}
 
 interface CachedRunner {
   eslint: unknown; // ESLint instance — typed as unknown to avoid importing ESLint at module level
+  /** Constructor and options, to build a fixing instance with the same config. */
+  ESLintClass: unknown;
+  eslintOptions: Record<string, unknown>;
   tsParserAvailable: boolean;
   pluginLoadMs: number;
   parserLoadMs: number;
@@ -237,59 +283,22 @@ function normalizePlugin(raw: unknown): AiGuardPlugin {
 
 // ─── Preset rule maps ─────────────────────────────────────────────────────────
 
-const RECOMMENDED_RULES: Record<string, RuleLevel> = {
-  // Reliability
-  'ai-guard/no-empty-catch': 'error',
-  'ai-guard/no-broad-exception': 'warn',
-  // Async
-  'ai-guard/no-floating-promise': 'error',
-  'ai-guard/no-await-in-loop': 'warn',
-  'ai-guard/no-async-without-await': 'warn',
-  'ai-guard/no-async-array-callback': 'warn',
-  // Security
-  'ai-guard/no-hardcoded-secret': 'error',
-  'ai-guard/no-eval-dynamic': 'error',
-  'ai-guard/no-sql-string-concat': 'warn',
-  'ai-guard/no-unsafe-deserialize': 'warn',
-  'ai-guard/require-auth-middleware': 'warn',
-  'ai-guard/require-authz-check': 'warn',
-  // AI Patterns
-  'ai-guard/no-dead-branch': 'warn',
-};
+/**
+ * Preset rule maps are derived from the plugin's own preset configs
+ * (src/configs/*), so the CLI, the MCP server and ESLint users always run
+ * the same rules at the same levels. Rules set to 'off' are dropped.
+ */
+function enabledRules(rules: Record<string, unknown> | undefined): Record<string, RuleLevel> {
+  const out: Record<string, RuleLevel> = {};
+  for (const [ruleId, level] of Object.entries(rules ?? {})) {
+    if (level === 'error' || level === 'warn') out[ruleId] = level;
+  }
+  return out;
+}
 
-const STRICT_RULES: Record<string, RuleLevel> = {
-  // Reliability
-  'ai-guard/no-empty-catch': 'error',
-  'ai-guard/no-broad-exception': 'error',
-  'ai-guard/no-catch-log-rethrow': 'error',
-  'ai-guard/no-catch-without-use': 'error',
-  // Async
-  'ai-guard/no-async-array-callback': 'error',
-  'ai-guard/no-floating-promise': 'error',
-  'ai-guard/no-await-in-loop': 'error',
-  'ai-guard/no-async-without-await': 'error',
-  'ai-guard/no-redundant-await': 'error',
-  // Security
-  'ai-guard/no-hardcoded-secret': 'error',
-  'ai-guard/no-eval-dynamic': 'error',
-  'ai-guard/no-sql-string-concat': 'error',
-  'ai-guard/no-unsafe-deserialize': 'error',
-  'ai-guard/require-auth-middleware': 'error',
-  'ai-guard/require-authz-check': 'error',
-  // AI Patterns
-  'ai-guard/no-console-in-handler': 'error',
-  'ai-guard/no-duplicate-logic-block': 'error',
-  'ai-guard/no-dead-branch': 'error',
-};
-
-const SECURITY_RULES: Record<string, RuleLevel> = {
-  'ai-guard/no-hardcoded-secret': 'error',
-  'ai-guard/no-eval-dynamic': 'error',
-  'ai-guard/no-sql-string-concat': 'error',
-  'ai-guard/no-unsafe-deserialize': 'warn',
-  'ai-guard/require-auth-middleware': 'warn',
-  'ai-guard/require-authz-check': 'warn',
-};
+const RECOMMENDED_RULES = enabledRules(recommendedConfig.rules);
+const STRICT_RULES = enabledRules(strictConfig.rules);
+const SECURITY_RULES = enabledRules(securityConfig.rules);
 
 /**
  * Agent preset — optimized for PostToolUse hooks (Claude Code, Cursor, etc.).
@@ -470,13 +479,19 @@ async function loadPluginModuleFromCwd(cwd: string): Promise<unknown> {
 // subsequent calls with the same cwd+preset reuse the cached instance, reducing
 // startup overhead from ~500-1000ms to ~0ms on warm runs within the same process.
 
+function runnerCacheKey(eslintCwd: string, preset: Preset, isolated: boolean, overrides?: Record<string, RuleLevel>): string {
+  const extra = overrides ? JSON.stringify(Object.entries(overrides).sort()) : '';
+  return `${eslintCwd}::${preset}::${isolated}::${extra}`;
+}
+
 async function getOrBuildRunner(
   cwd: string,
   preset: Preset,
   eslintCwd: string,
   isolated = false,
+  ruleOverrides?: Record<string, RuleLevel>,
 ): Promise<{ runner: CachedRunner; fromCache: boolean }> {
-  const cacheKey = `${eslintCwd}::${preset}::${isolated}`;
+  const cacheKey = runnerCacheKey(eslintCwd, preset, isolated, ruleOverrides);
   const cached = _runnerCache.get(cacheKey);
   if (cached) {
     return { runner: cached, fromCache: true };
@@ -521,7 +536,7 @@ async function getOrBuildRunner(
   ]);
 
   const plugin = normalizePlugin(rawPlugin);
-  const rules = getRules(preset);
+  const rules = ruleOverrides ? { ...getRules(preset), ...ruleOverrides } : getRules(preset);
   const { tsParser, available: tsParserAvailable } = tsParserResult;
 
   // ── Build flat config ──────────────────────────────────────────────────────
@@ -584,15 +599,18 @@ async function getOrBuildRunner(
     });
   }
 
-  const eslint = new ESLint({
+  const eslintOptions = {
     cwd: eslintCwd,
     overrideConfigFile: true as unknown as string,
     overrideConfig: configBlocks,
     ...(isolated ? { allowInlineConfig: false } : {}),
-  });
+  };
+  const eslint = new ESLint(eslintOptions);
 
   const runner: CachedRunner = {
     eslint,
+    ESLintClass: ESLint,
+    eslintOptions: eslintOptions as Record<string, unknown>,
     tsParserAvailable,
     pluginLoadMs: 0, // accounted in parallel Promise.all
     parserLoadMs: tsParserResult.loadMs,
@@ -652,7 +670,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
 
   // ── Get or build cached runner ─────────────────────────────────────────────
   const initStart = Date.now();
-  const { runner, fromCache } = await getOrBuildRunner(cwd, options.preset, eslintCwd, options.isolated);
+  const { runner, fromCache } = await getOrBuildRunner(cwd, options.preset, eslintCwd, options.isolated, options.rules);
   const initMs = Date.now() - initStart;
 
   const timing: TimingBreakdown = {
@@ -691,6 +709,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
       endLine?: number;
       endColumn?: number;
       fatal?: boolean;
+      fix?: unknown;
     }>;
     errorCount: number;
     warningCount: number;
@@ -730,8 +749,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
         .flatMap((r) => r.value);
     } else {
       // Invalidate the cache for this key so the next call rebuilds fresh
-      const cacheKey = `${eslintCwd}::${options.preset}::${options.isolated ?? false}`;
-      _runnerCache.delete(cacheKey);
+      _runnerCache.delete(runnerCacheKey(eslintCwd, options.preset, options.isolated ?? false, options.rules));
       throw error;
     }
   }
@@ -800,6 +818,7 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
         category: ISSUE_CATEGORY[ruleId],
         asyncRiskType: ISSUE_ASYNC_RISK_TYPE[ruleId],
         remediation: ISSUE_REMEDIATION[ruleId],
+        ...(m.fix !== undefined ? { fixable: true } : {}),
       };
 
       aiGuardIssues.push(issue);
@@ -860,5 +879,90 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
     parserErrors,
     ignoredFiles,
     tsParserAvailable: runner.tsParserAvailable,
+  };
+}
+
+// ─── Autofix ──────────────────────────────────────────────────────────────────
+
+export interface FixTextResult {
+  /** Source after fixes (equal to the input when nothing was fixed). */
+  output: string;
+  changed: boolean;
+  /** Rules whose fixes were applied. */
+  fixedRuleIds: string[];
+  /** Number of findings fixed. */
+  fixedCount: number;
+  /** ai-guard findings that remain after fixing. */
+  remaining: IssueDetail[];
+  /** Set when the file could not be parsed; nothing is fixed then. */
+  parserError?: string;
+}
+
+type LintMessage = { ruleId: string | null; severity: number; message: string; line: number; column: number; endLine?: number; endColumn?: number; fatal?: boolean; fix?: unknown };
+type LintTextResult = { output?: string; messages: LintMessage[] };
+type LintTextCapable = { lintText(code: string, options: { filePath: string; warnIgnored?: boolean }): Promise<LintTextResult[]> };
+
+function toIssue(m: LintMessage): IssueDetail {
+  const ruleId = m.ruleId ?? 'unknown';
+  return {
+    ruleId,
+    severity: m.severity as 1 | 2,
+    message: m.message,
+    line: m.line,
+    column: m.column,
+    endLine: m.endLine,
+    endColumn: m.endColumn,
+    confidence: ISSUE_CONFIDENCE[ruleId],
+    category: ISSUE_CATEGORY[ruleId],
+    remediation: ISSUE_REMEDIATION[ruleId],
+    ...(m.fix !== undefined ? { fixable: true } : {}),
+  };
+}
+
+/**
+ * Applies ai-guard autofixes to source text in memory. Never writes files.
+ * `rules` (full IDs) limits which rules may fix; by default every enabled rule may.
+ */
+export async function fixSourceText(options: {
+  filePath: string;
+  text: string;
+  preset: Preset;
+  /** Directory the ESLint instance runs in; must contain filePath. */
+  cwd: string;
+  rules?: string[];
+  isolated?: boolean;
+}): Promise<FixTextResult> {
+  const { runner } = await getOrBuildRunner(options.cwd, options.preset, options.cwd, options.isolated ?? false);
+  const allowed = options.rules && options.rules.length > 0 ? new Set(options.rules) : null;
+  const isAllowed = (ruleId: string | null): boolean => Boolean(ruleId && ruleId.startsWith('ai-guard/') && (!allowed || allowed.has(ruleId)));
+
+  const linter = runner.eslint as LintTextCapable;
+  const [before] = await linter.lintText(options.text, { filePath: options.filePath, warnIgnored: true });
+  const fatal = before?.messages.find((m) => m.fatal);
+  if (!before || fatal) {
+    return { output: options.text, changed: false, fixedRuleIds: [], fixedCount: 0, remaining: [], parserError: fatal?.message ?? 'File was not linted' };
+  }
+  const fixable = before.messages.filter((m) => m.fix !== undefined && isAllowed(m.ruleId));
+  if (fixable.length === 0) {
+    return { output: options.text, changed: false, fixedRuleIds: [], fixedCount: 0, remaining: before.messages.filter((m) => m.ruleId?.startsWith('ai-guard/')).map(toIssue) };
+  }
+
+  const ESLintClass = runner.ESLintClass as new (opts: Record<string, unknown>) => LintTextCapable;
+  const fixer = new ESLintClass({ ...runner.eslintOptions, fix: (m: { ruleId: string | null }) => isAllowed(m.ruleId) });
+  const [after] = await fixer.lintText(options.text, { filePath: options.filePath, warnIgnored: true });
+  const output = after?.output ?? options.text;
+  const remaining = (after?.messages ?? []).filter((m) => m.ruleId?.startsWith('ai-guard/')).map(toIssue);
+  const remainingByRule = new Map<string, number>();
+  for (const issue of remaining) remainingByRule.set(issue.ruleId, (remainingByRule.get(issue.ruleId) ?? 0) + 1);
+  const beforeByRule = new Map<string, number>();
+  for (const m of fixable) beforeByRule.set(m.ruleId as string, (beforeByRule.get(m.ruleId as string) ?? 0) + 1);
+  const fixedRuleIds = [...beforeByRule.keys()].filter((id) => (remainingByRule.get(id) ?? 0) < (before.messages.filter((m) => m.ruleId === id).length)).sort();
+
+  return {
+    output,
+    changed: output !== options.text,
+    fixedRuleIds,
+    fixedCount: Math.max(0, before.messages.filter((m) => m.ruleId?.startsWith('ai-guard/')).length - remaining.length),
+    remaining,
   };
 }

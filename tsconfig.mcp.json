@@ -10,6 +10,6 @@
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src/mcp/**/*.ts", "cli/utils/eslint-runner.ts", "cli/utils/git-diff.ts", "cli/utils/logger.ts", "src/rules/**/*.ts", "src/configs/**/*.ts", "src/utils/**/*.ts"],
+  "include": ["src/mcp/**/*.ts", "cli/utils/eslint-runner.ts", "cli/utils/git-diff.ts", "cli/utils/logger.ts", "cli/utils/verify.ts", "cli/utils/change-set.ts", "cli/utils/test-integrity.ts", "cli/utils/agent-config.ts", "cli/utils/check-catalog.ts", "cli/utils/unified-diff.ts", "src/rules/**/*.ts", "src/configs/**/*.ts", "src/utils/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests"]
 }

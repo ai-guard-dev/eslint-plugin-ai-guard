@@ -13,6 +13,10 @@ export const AGENT_RULES: Record<string, 'error' | 'warn' | 'off'> = {
   'ai-guard/no-empty-catch': 'error',
   'ai-guard/no-sql-string-concat': 'error',
   'ai-guard/no-floating-promise': 'error',
+  // Near-zero false positives, and each one is fixable on the spot by the agent.
+  'ai-guard/no-client-exposed-secret': 'error',
+  'ai-guard/no-invisible-unicode': 'error',
+  'ai-guard/no-undeclared-import': 'error',
 };
 
 const agent: TSESLint.ClassicConfig.Config = {

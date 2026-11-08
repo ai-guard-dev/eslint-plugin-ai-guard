@@ -26,6 +26,7 @@ const RULE_CATEGORIES: Record<RuleCategory, string[]> = {
     'no-broad-exception',
     'no-catch-log-rethrow',
     'no-catch-without-use',
+    'no-silent-fallback',
   ],
   async: [
     'no-async-array-callback',
@@ -41,13 +42,24 @@ const RULE_CATEGORIES: Record<RuleCategory, string[]> = {
     'no-unsafe-deserialize',
     'require-auth-middleware',
     'require-authz-check',
+    'no-client-exposed-secret',
+    'no-invisible-unicode',
+    'no-unsanitized-html',
+    'no-undeclared-import',
   ],
   quality: [
     'no-console-in-handler',
     'no-duplicate-logic-block',
     'no-dead-branch',
+    'no-placeholder-implementation',
+    'no-tautological-assertion',
+    'no-assertionless-test',
+    'no-test-env-branch',
   ],
 };
+
+/** Number of rules the generated files describe. */
+const RULE_COUNT = Object.values(RULE_CATEGORIES).reduce((n, rules) => n + rules.length, 0);
 
 const ALL_CATEGORIES: RuleCategory[] = ['error-handling', 'async', 'security', 'quality'];
 
@@ -63,7 +75,14 @@ function errorHandlingSection(): string {
 
 **Never** catch, log, and immediately rethrow without adding context:
   ❌  catch (e) { console.error(e); throw e; }
-  ✅  catch (e) { throw new Error('fetchUser failed', { cause: e }); }`;
+  ✅  catch (e) { throw new Error('fetchUser failed', { cause: e }); }
+
+**Never** give a secret env var a hardcoded fallback, and never turn a failed
+awaited call into empty data:
+  ❌  const secret = process.env.JWT_SECRET || 'secret';
+  ✅  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is not set');
+  ❌  try { return await db.orders.findMany(); } catch { return []; }
+  ✅  catch (e) { throw new Error('loading orders failed', { cause: e }); }`;
 }
 
 function asyncSection(): string {
@@ -104,7 +123,24 @@ without schema validation.
   ✅  router.get('/admin/users', requireAuth, getUsers);
 
 **Always** verify that the authenticated user owns or has access to the
-resource being accessed when using req.params.id or similar identifiers.`;
+resource being accessed when using req.params.id or similar identifiers.
+
+**Never** expose a server secret to the browser: no NEXT_PUBLIC_ / VITE_ /
+EXPO_PUBLIC_ / REACT_APP_ prefix on secret keys, no server secrets in
+"use client" files, no dangerouslyAllowBrowser with the app's own key:
+  ❌  new OpenAI({ apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY })
+  ✅  Call the model from an API route or server action.
+
+**Never** write dynamic values into innerHTML, insertAdjacentHTML,
+document.write or dangerouslySetInnerHTML without sanitizing:
+  ❌  el.innerHTML = "<p>" + user.bio + "</p>";
+  ✅  el.textContent = user.bio;  or  el.innerHTML = DOMPurify.sanitize(html);
+
+**Never** import a package that is not in package.json. Confirm a new
+package exists on npm (and is the one you meant) before installing it.
+
+**Never** leave invisible Unicode (zero-width, bidi override, tag characters)
+in code; write escapes such as \\u200B when a string needs one.`;
 }
 
 function qualitySection(): string {
@@ -113,7 +149,17 @@ function qualitySection(): string {
 handlers or event listeners in production code.
 
 **Never** copy-paste the same logic block consecutively — extract shared
-logic into a helper function or consolidate duplicated code.`;
+logic into a helper function or consolidate duplicated code.
+
+**Never** leave placeholders when finishing a task: no "// ... rest of the
+code" or "// existing code here" comments (write the code out in full), no
+stub bodies holding only a TODO, no throw new Error('Not implemented'), and
+no hardcoded mock data returned from production code.
+
+**Never** make a failing test pass by weakening it: no expect(true).toBe(true),
+no tests without assertions, no .skip/.only, no deleted assertions, and no
+if (process.env.NODE_ENV === 'test') return <canned result> in source code.
+Fix the code, or tell the user the test is wrong.`;
 }
 
 type SectionFn = () => string;
@@ -191,7 +237,11 @@ Good: catch (e) { if (e instanceof NetworkError) { retry(); } throw e; }
 
 Rule: no-catch-log-rethrow
 Bad:  catch (e) { console.error(e); throw e; }
-Good: catch (e) { throw new Error('fetchUser failed', { cause: e }); }`;
+Good: catch (e) { throw new Error('fetchUser failed', { cause: e }); }
+
+Rule: no-silent-fallback
+Bad:  const secret = process.env.JWT_SECRET || 'secret';
+Good: if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is not set');`;
 }
 
 function cursorAsyncSection(): string {
@@ -239,7 +289,23 @@ Good: router.get('/admin/users', requireAuth, getUsers);
 
 Rule: require-authz-check
 Bad:  const user = await db.findById(req.params.id); res.json(user);
-Good: const user = await db.findById(req.params.id); if (user.ownerId !== req.user.id) throw new ForbiddenError(); res.json(user);`;
+Good: const user = await db.findById(req.params.id); if (user.ownerId !== req.user.id) throw new ForbiddenError(); res.json(user);
+
+Rule: no-client-exposed-secret
+Bad:  new OpenAI({ apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY })
+Good: Call the model from an API route or server action.
+
+Rule: no-unsanitized-html
+Bad:  el.innerHTML = "<p>" + user.bio + "</p>";
+Good: el.textContent = user.bio;
+
+Rule: no-undeclared-import
+Bad:  import { helper } from 'package-not-in-package-json';
+Good: Confirm the package exists on npm, add it to package.json, then import it.
+
+Rule: no-invisible-unicode
+Bad:  Zero-width or bidi-override characters pasted into code or strings.
+Good: Visible escapes such as \\u200B.`;
 }
 
 function cursorQualitySection(): string {
@@ -251,7 +317,19 @@ Good: router.get('/users', (req, res) => { logger.info('hit'); ... });
 
 Rule: no-duplicate-logic-block
 Bad:  Two identical consecutive code blocks copy-pasted.
-Good: Extract the duplicated logic into a shared helper function.`;
+Good: Extract the duplicated logic into a shared helper function.
+
+Rule: no-placeholder-implementation
+Bad:  // ... rest of the code remains the same
+Good: Write the complete code; never elide or stub it out.
+
+Rule: no-tautological-assertion / no-assertionless-test
+Bad:  it('works', () => { expect(true).toBe(true); });
+Good: it('adds', () => { expect(add(1, 2)).toBe(3); });
+
+Rule: no-test-env-branch
+Bad:  if (process.env.NODE_ENV === 'test') return { ok: true };
+Good: Inject or mock the dependency in the test; keep one code path.`;
 }
 
 const CURSOR_SECTION_MAP: Record<RuleCategory, () => string> = {
@@ -268,7 +346,7 @@ function generateCursorFile(version: string, categories: RuleCategory[]): string
 # DO NOT EDIT MANUALLY — generated by eslint-plugin-ai-guard
 # Regenerate: npx ai-guard init-context --force
 
-This project uses eslint-plugin-ai-guard to catch the 18 most common
+This project uses eslint-plugin-ai-guard to catch the ${RULE_COUNT} most common
 anti-patterns generated by AI coding tools. Follow these rules when
 generating or editing code in this project. Violations will be flagged
 as lint errors.
@@ -293,6 +371,7 @@ function copilotQuickRef(categories: RuleCategory[]): string {
       'Never: generate empty catch blocks',
       'Never: catch (e: any) without narrowing',
       'Never: catch, log, and rethrow without adding context',
+      'Never: give secret env vars a hardcoded fallback',
     );
   }
   if (categories.includes('async')) {
@@ -311,12 +390,17 @@ function copilotQuickRef(categories: RuleCategory[]): string {
       'Never: JSON.parse() untrusted input without validation',
       'Always: add auth middleware before route handlers',
       'Always: verify resource ownership in handlers',
+      'Never: expose server secrets to the browser (NEXT_PUBLIC_/VITE_ prefixes, "use client")',
+      'Never: write unsanitized dynamic values into innerHTML or dangerouslySetInnerHTML',
+      'Never: import packages that are not declared in package.json',
     );
   }
   if (categories.includes('quality')) {
     lines.push(
       'Never: leave console.log in route handlers',
       'Never: copy-paste identical consecutive code blocks',
+      'Never: leave "... rest of the code" elisions, TODO stubs, or mock data in production code',
+      'Never: weaken tests to make them pass (tautological asserts, .skip/.only, deleted assertions, test-env shortcuts)',
     );
   }
 
@@ -494,7 +578,7 @@ export function registerInitContextCommand(program: Command): void {
     .command('init-context')
     .description(
       'Generate AI agent instruction files (CLAUDE.md, .cursorrules, copilot-instructions.md)\n' +
-      'so Claude Code, Cursor, and GitHub Copilot avoid the 18 most common AI anti-patterns.',
+      `so Claude Code, Cursor, and GitHub Copilot avoid the ${RULE_COUNT} most common AI anti-patterns.`,
     )
     .option('-a, --all', 'Generate files for all agents (skip prompt)')
     .option('--force', 'Overwrite existing files without asking')
@@ -632,7 +716,7 @@ export function registerInitContextCommand(program: Command): void {
         const createdCount = results.filter((r) => r.status === 'created').length;
         if (createdCount > 0) {
           log.success(
-            'Done. Your AI agents will now automatically avoid the 18 most common AI-generated code anti-patterns.',
+            `Done. Your AI agents will now automatically avoid the ${RULE_COUNT} most common AI-generated code anti-patterns.`,
           );
         }
       }

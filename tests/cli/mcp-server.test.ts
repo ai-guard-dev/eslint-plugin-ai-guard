@@ -122,11 +122,11 @@ describe('Workspace utils', () => {
 // ─── ai_guard_rules tests ────────────────────────────────────────────────────
 
 describe('ai_guard_rules', () => {
-  it('returns all 18 rules', () => {
+  it('returns all 27 rules', () => {
     const result = getRules({});
     expect(result.success).toBe(true);
-    expect(result.totalRules).toBe(18);
-    expect(result.rules).toHaveLength(18);
+    expect(result.totalRules).toBe(27);
+    expect(result.rules).toHaveLength(27);
   });
 
   it('returns all 4 presets', () => {
@@ -137,10 +137,10 @@ describe('ai_guard_rules', () => {
     expect(result.presets).toHaveLength(4);
   });
 
-  it('agent preset contains exactly 5 rules', () => {
+  it('agent preset contains exactly 8 rules', () => {
     const result = getRules({ preset: 'agent' });
     expect(result.preset).toBe('agent');
-    expect(result.presetRules).toHaveLength(5);
+    expect(result.presetRules).toHaveLength(8);
     expect(result.presetRules).toEqual(
       expect.arrayContaining([
         'ai-guard/no-hardcoded-secret',
@@ -273,15 +273,35 @@ console.log(x);
 // ─── ai_guard_scan_diff tests ─────────────────────────────────────────────────
 
 describe('ai_guard_scan_diff', () => {
+  // A throwaway repository: scanning the real working tree would make these
+  // tests' results and runtime depend on whatever happens to be uncommitted.
+  let repo: string;
+
   beforeAll(() => {
     setWorkspaceRoot(PROJECT_ROOT);
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-guard-scan-diff-'));
+    const git = (...args: string[]): void => {
+      execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+    };
+    git('init');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    fs.writeFileSync(path.join(repo, 'index.ts'), 'export const x = 1;\n', 'utf-8');
+    git('add', '.');
+    git('commit', '-m', 'init');
+  });
+
+  afterAll(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
   });
 
   it('handles no changes gracefully', async () => {
-    const result = await scanDiff({ preset: 'agent' });
+    const result = await scanDiff({ preset: 'agent' }, repo);
     expect(result.success).toBe(true);
-    // May or may not have changes depending on working tree state
-    expect(Array.isArray(result.issues)).toBe(true);
+    expect(result.clean).toBe(true);
+    expect(result.changedFiles).toBe(0);
+    expect(result.issues).toEqual([]);
+    expect(result.testIntegrity?.findings).toEqual([]);
     expect(typeof result.durationMs).toBe('number');
   });
 
@@ -305,15 +325,14 @@ describe('ai_guard_scan_diff', () => {
   });
 
   it('scans newly created untracked JS/TS file without requiring git add', async () => {
-    const untrackedFile = path.join(PROJECT_ROOT, 'tests', 'fixtures', 'mcp-untracked-fixture.ts');
-    fs.mkdirSync(path.dirname(untrackedFile), { recursive: true });
+    const untrackedFile = path.join(repo, 'mcp-untracked-fixture.ts');
     fs.writeFileSync(
       untrackedFile,
       'const secretKey = "sk-live-1234567890abcdef";\n',
       'utf-8',
     );
     try {
-      const result = await scanDiff({ preset: 'agent' });
+      const result = await scanDiff({ preset: 'agent' }, repo);
       expect(result.success).toBe(true);
       const secretIssue = result.issues.find(
         (i) => i.ruleId === 'ai-guard/no-hardcoded-secret' && i.file.includes('mcp-untracked-fixture.ts'),

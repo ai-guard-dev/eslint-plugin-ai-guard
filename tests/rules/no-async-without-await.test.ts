@@ -3,6 +3,10 @@ import { noAsyncWithoutAwait } from '../../src/rules/async/no-async-without-awai
 
 ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
   valid: [
+    // An await nested inside an expression-bodied arrow is still an await
+    'const f = async () => (await load()).items;',
+    'const f = async () => [await load()];',
+    'const f = async () => wrap(await load());',
     {
       code: `
         async function run() {
@@ -155,6 +159,11 @@ ruleTester.run('no-async-without-await', noAsyncWithoutAwait, {
     },
   ],
   invalid: [
+    // An await in a nested function does not belong to the outer one
+    {
+      code: 'const f = async () => async () => await load();',
+      errors: [{ messageId: 'asyncWithoutAwait' }],
+    },
     // Pass-through wrappers — produce asyncPassThrough (informational), not asyncWithoutAwait
     {
       code: `async function wrap() { return fetchData(); }`,

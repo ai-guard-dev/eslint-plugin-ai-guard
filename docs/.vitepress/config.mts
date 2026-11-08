@@ -31,6 +31,9 @@ export default defineConfig({
           { text: 'preset', link: '/cli/preset' },
           { text: 'ignore', link: '/cli/ignore' },
           { text: 'baseline', link: '/cli/baseline' },
+          { text: 'verify', link: '/cli/verify' },
+          { text: 'test integrity', link: '/cli/test-integrity' },
+          { text: 'scan-agent-config', link: '/cli/scan-agent-config' },
         ],
       },
       {

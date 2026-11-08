@@ -34,7 +34,7 @@
 ## What is AI Guard?
 
 **AI Guard** (`eslint-plugin-ai-guard`) provides:
-- **ESLint plugin** with 18 deterministic rules and 4 presets (`recommended`, `strict`, `security`, `agent`)
+- **ESLint plugin** with 27 deterministic rules and 4 presets (`recommended`, `strict`, `security`, `agent`)
 - **CLI** (`ai-guard`) for terminal, changed-file, and CI scanning
 - **GitHub Action** with native SARIF 2.1.0 output for GitHub Code Scanning
 - **Claude Code integration** with a zero-config PostToolUse hook
@@ -49,7 +49,7 @@ AI Guard analyzes Abstract Syntax Trees (AST) using ESLint's native engine. It r
 > [!IMPORTANT]
 > - **AI Guard is NOT an AI detector.** It does not attempt to predict whether code was authored by an LLM or a human.
 > - **AI Guard detects dangerous or fragile code patterns** that LLMs repeatedly introduce due to incomplete context, hallucinated patterns, or probabilistic generation.
-> - **AI Guard does NOT replace ESLint.** It extends ESLint with 18 specialized, high-impact rules that core ESLint and standard configurations omit.
+> - **AI Guard does NOT replace ESLint.** It extends ESLint with 27 specialized, high-impact rules that core ESLint and standard configurations omit.
 
 ---
 
@@ -90,7 +90,7 @@ flowchart TD
     subgraph Analysis["2. Deterministic AST Analysis"]
         B --> C["ESLint Parser\n(espree / @typescript-eslint/parser)"]
         C --> D["AST Representation"]
-        D --> E["AI Guard Rules Engine\n(18 Deterministic Rules)"]
+        D --> E["AI Guard Rules Engine\n(27 Deterministic Rules)"]
     end
 
     subgraph Tiers["3. Classification & Presets"]
@@ -117,9 +117,9 @@ flowchart TD
 
 ## Rules Catalog
 
-AI Guard includes **18 deterministic rules** divided into four specialized categories. Every rule is engineered with low false-positive heuristics and validated against real-world production codebases:
+AI Guard includes **27 deterministic rules** divided into four specialized categories. Every rule is engineered with low false-positive heuristics and validated against real-world production codebases:
 
-### 🔴 Security (6 Rules)
+### 🔴 Security (10 Rules)
 
 | Rule | Recommended | What It Catches | Fixable? |
 | :--- | :---: | :--- | :---: |
@@ -129,8 +129,12 @@ AI Guard includes **18 deterministic rules** divided into four specialized categ
 | [`no-unsafe-deserialize`](./docs/rules/no-unsafe-deserialize.md) | `warn` | Unchecked `JSON.parse()` called directly on HTTP request inputs (`req.body`, `req.query`, `req.params`). | No |
 | [`require-auth-middleware`](./docs/rules/require-auth-middleware.md) | `warn` | Express and Fastify route definitions exposed without authentication middleware. | No |
 | [`require-authz-check`](./docs/rules/require-authz-check.md) | `warn` | Endpoints accessing sensitive resources or user IDs without tenant/ownership authorization checks. | No |
+| [`no-client-exposed-secret`](./docs/rules/no-client-exposed-secret.md) | **`error`** | Server secrets that reach the browser: `NEXT_PUBLIC_`/`VITE_`/`EXPO_PUBLIC_` prefixes on secret keys, server secrets in `"use client"` files, `dangerouslyAllowBrowser` with the app's own key. | No |
+| [`no-invisible-unicode`](./docs/rules/no-invisible-unicode.md) | **`error`** | Trojan Source bidi overrides, zero-width and Hangul-filler characters, and Unicode tag characters that hide instructions for AI tools (decoded in the message). | **Yes** (escapes in strings, removal in comments) |
+| [`no-unsanitized-html`](./docs/rules/no-unsanitized-html.md) | `warn` | Dynamic values in `innerHTML`, `insertAdjacentHTML`, `document.write` and `dangerouslySetInnerHTML`, with sharper messages for URL input, LLM output, markdown and JSON-LD. | No |
+| [`no-undeclared-import`](./docs/rules/no-undeclared-import.md) | `warn` | Imports of packages missing from package.json: hallucinated names (slopsquatting) and phantom dependencies. Offline and monorepo-aware. | No |
 
-### 🟠 Reliability (4 Rules)
+### 🟠 Reliability (5 Rules)
 
 | Rule | Recommended | What It Catches | Fixable? |
 | :--- | :---: | :--- | :---: |
@@ -138,6 +142,7 @@ AI Guard includes **18 deterministic rules** divided into four specialized categ
 | [`no-broad-exception`](./docs/rules/no-broad-exception.md) | `warn` | Catching broad exception types like `catch (e: any)` that mask system faults and typing. | No |
 | [`no-catch-log-rethrow`](./docs/rules/no-catch-log-rethrow.md) | `off`* | Catch blocks that only log to `console` and rethrow without adding context or diagnostic info. | No |
 | [`no-catch-without-use`](./docs/rules/no-catch-without-use.md) | `off`* | Caught error variables that are declared in catch parameters but never referenced. | No |
+| [`no-silent-fallback`](./docs/rules/no-silent-fallback.md) | `warn` | Secret env vars with hardcoded fallbacks (`process.env.JWT_SECRET \|\| 'secret'`) and `catch { return [] }` around awaited I/O. | No |
 
 ### 🟡 Async Stability (5 Rules)
 
@@ -149,15 +154,33 @@ AI Guard includes **18 deterministic rules** divided into four specialized categ
 | [`no-async-without-await`](./docs/rules/no-async-without-await.md) | `warn` | Functions declared `async` that never execute an `await` expression, adding unnecessary Promise overhead. | No |
 | [`no-redundant-await`](./docs/rules/no-redundant-await.md) | `off`* | Redundant `return await` statements outside of `try...catch` blocks. | No |
 
-### 🔵 AI Patterns (3 Rules)
+### 🔵 AI Patterns (7 Rules)
 
 | Rule | Recommended | What It Catches | Fixable? |
 | :--- | :---: | :--- | :---: |
 | [`no-dead-branch`](./docs/rules/no-dead-branch.md) | `warn` | Unreachable or tautological branches (`if (true)`, `if (false)`, `x && !x`) left behind from LLM code synthesis. | No |
 | [`no-duplicate-logic-block`](./docs/rules/no-duplicate-logic-block.md) | `off`* | Consecutive duplicate code blocks or repeated conditional branches duplicated during AI edits. | No |
 | [`no-console-in-handler`](./docs/rules/no-console-in-handler.md) | `off`* | Unstructured `console.log` statements left in HTTP route handlers instead of production loggers. | No |
+| [`no-placeholder-implementation`](./docs/rules/no-placeholder-implementation.md) | `warn` | Code an agent left unfinished: `// ... rest of the code` elisions that delete code, TODO-only stubs, `throw new Error('Not implemented')` bodies, and mock data served from production code. | No |
+| [`no-tautological-assertion`](./docs/rules/no-tautological-assertion.md) | `warn` | Assertions that always pass: `expect(true).toBe(true)`, `expect(x).toEqual(x)`, `assert.ok(1)`. | No |
+| [`no-assertionless-test`](./docs/rules/no-assertionless-test.md) | `warn` | Test cases with no assertion, which pass whatever the code does. | No |
+| [`no-test-env-branch`](./docs/rules/no-test-env-branch.md) | `warn` | Production code that returns a canned result under a test runner (`if (NODE_ENV === 'test') return true`). | No |
 
 *\* Enabled at `error` level in the `strict` preset.*
+
+---
+
+## Agent Safety
+
+Linting checks the code. These check the agent:
+
+| Feature | What it does |
+| :--- | :--- |
+| [`ai-guard verify`](./docs/cli/verify.md) | One verdict for the current change: lint findings it introduced, weakened tests, and agent-config issues. Pre-existing problems never block. |
+| [`ai-guard changed --test-integrity`](./docs/cli/test-integrity.md) | Compares tests before and after a change: focused, skipped, removed or weakened tests, rewritten snapshots, and test commands that can no longer fail. |
+| [`ai-guard scan-agent-config`](./docs/cli/scan-agent-config.md) | Scans `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, skills and MCP configs for hidden text, prompt injection, unpinned MCP servers and inline secrets. |
+| [Claude Code hooks](./docs/integrations/claude-code.md) | Findings reach Claude after each edit. When Claude finishes, the whole change is verified; what is still unresolved is shown to you. |
+| [MCP tools](./docs/mcp-server.md) | `ai_guard_verify_change`, `ai_guard_scan_agent_config`, and `ai_guard_fix` (a diff, unless `apply` is set). |
 
 ---
 
@@ -167,10 +190,10 @@ AI Guard exports four official configurations ready for flat config or legacy se
 
 | Preset | Description | Configuration Focus |
 | :--- | :--- | :--- |
-| **`recommended`** | **Default.** Balanced adoption preset. Enables 4 high-confidence critical rules at `error`, 9 context-sensitive rules at `warn`, and disables 5 noisy rules. Zero noise on day one. | Production codebases, new teams |
-| **`strict`** | Enforces **all 18 rules at `error`**. Designed for zero-tolerance CI gates, high-assurance software, and mature teams. | Strict CI/CD quality gates |
-| **`security`** | Focuses exclusively on the **6 security rules** (`no-hardcoded-secret`, `no-eval-dynamic`, `no-sql-string-concat` at `error`; remainder at `warn`). | AppSec auditing & security scans |
-| **`agent`** | **5 high-signal rules at `error`**. Optimized for AI-agent editing workflows where lint feedback runs immediately after each file edit (e.g., PostToolUse hooks). | Claude Code, Cursor, real-time agent loops |
+| **`recommended`** | **Default.** Balanced adoption preset. Enables 6 high-confidence critical rules at `error`, 16 context-sensitive rules at `warn`, and disables 5 noisy rules. Zero noise on day one. | Production codebases, new teams |
+| **`strict`** | Enforces **all 27 rules at `error`**. Designed for zero-tolerance CI gates, high-assurance software, and mature teams. | Strict CI/CD quality gates |
+| **`security`** | Focuses on the **11 security-relevant rules** (secrets, eval, SQL, client-exposed secrets, invisible Unicode and HTML sinks at `error`; the rest at `warn`). | AppSec auditing & security scans |
+| **`agent`** | **8 high-signal rules at `error`**. Optimized for AI-agent editing workflows where lint feedback runs immediately after each file edit (e.g., PostToolUse hooks). | Claude Code, Cursor, real-time agent loops |
 
 ---
 
@@ -227,7 +250,7 @@ export default [
 To use the `strict` or `security` preset in flat config:
 
 ```javascript
-// Strict preset — all 18 rules at error
+// Strict preset — all 27 rules at error
 rules: {
   ...aiGuard.configs.strict.rules,
 }
@@ -339,7 +362,7 @@ AI Guard integrates directly with [Claude Code](https://docs.anthropic.com/en/do
 npx ai-guard init-claude
 ```
 
-This configures a PostToolUse hook in `.claude/settings.json` that runs AI Guard's fast `agent` preset (5 high-confidence rules, ~50-200ms per file) after every file edit. Claude Code reads the diagnostics and can fix issues automatically.
+This configures a PostToolUse hook in `.claude/settings.json` that runs AI Guard's fast `agent` preset (8 high-confidence rules) after every file edit. Claude Code reads the diagnostics and can fix issues automatically.
 
 ```bash
 # Preview before applying
@@ -569,9 +592,15 @@ Conventional linters either omit AI-specific hazards entirely or require heavywe
 | **Async Without Await** | [`no-async-without-await`](./docs/rules/no-async-without-await.md) | ❌ None | `require-await` |
 | **Sequential Await in Loop** | [`no-await-in-loop`](./docs/rules/no-await-in-loop.md) | `no-await-in-loop` *(no fix)* | ❌ None |
 | **Dead Code Branches (`if (true)`)** | [`no-dead-branch`](./docs/rules/no-dead-branch.md) | ❌ None | ❌ None |
+| **Secrets exposed to the browser** (`NEXT_PUBLIC_*_SECRET`) | [`no-client-exposed-secret`](./docs/rules/no-client-exposed-secret.md) | ❌ None | ❌ None |
+| **Trojan Source / hidden Unicode instructions** | [`no-invisible-unicode`](./docs/rules/no-invisible-unicode.md) | Partial: `no-irregular-whitespace` *(whitespace only)* | ❌ None |
+| **Hallucinated / undeclared packages** | [`no-undeclared-import`](./docs/rules/no-undeclared-import.md) | ❌ None | ❌ None |
+| **Unsanitized HTML sinks (XSS)** | [`no-unsanitized-html`](./docs/rules/no-unsanitized-html.md) | ❌ None | ❌ None |
+| **Hardcoded secret fallbacks** | [`no-silent-fallback`](./docs/rules/no-silent-fallback.md) | ❌ None | ❌ None |
+| **Elided / stubbed code left by agents** | [`no-placeholder-implementation`](./docs/rules/no-placeholder-implementation.md) | Partial: `no-warning-comments` *(TODO text only)* | ❌ None |
 
 > [!TIP]
-> **Minimal Type-Information Dependency:** 17 of 18 AI Guard rules operate in pure syntax/scope-analysis mode without `projectService` or `tsconfig.json`. The `no-floating-promise` rule optionally uses TypeScript parser services for higher recall on cross-module Promise calls, with syntax/scope-based heuristics as a zero-config fallback.
+> **Minimal Type-Information Dependency:** 26 of 27 AI Guard rules operate in pure syntax/scope-analysis mode without `projectService` or `tsconfig.json`. The `no-floating-promise` rule optionally uses TypeScript parser services for higher recall on cross-module Promise calls, with syntax/scope-based heuristics as a zero-config fallback.
 
 ---
 

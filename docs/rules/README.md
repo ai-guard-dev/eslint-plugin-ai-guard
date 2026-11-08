@@ -1,6 +1,6 @@
 # Rules Reference
 
-All 18 rules provided by `eslint-plugin-ai-guard`, organized by category.
+All 27 rules provided by `eslint-plugin-ai-guard`, organized by category.
 
 ---
 
@@ -12,6 +12,7 @@ All 18 rules provided by `eslint-plugin-ai-guard`, organized by category.
 | [no-broad-exception](no-broad-exception.md) | `warn` | `error` | `catch (e: any)` loses all type information |
 | [no-catch-log-rethrow](no-catch-log-rethrow.md) | `off` | `error` | Log-then-rethrow adds noise, no recovery |
 | [no-catch-without-use](no-catch-without-use.md) | `off` | `error` | Catch parameter declared but never used |
+| [no-silent-fallback](no-silent-fallback.md) | `warn` | `error` | Hardcoded fallbacks for secret env vars; `catch { return [] }` around awaited I/O |
 
 ## 🟡 Async Stability
 
@@ -33,6 +34,10 @@ All 18 rules provided by `eslint-plugin-ai-guard`, organized by category.
 | [no-unsafe-deserialize](no-unsafe-deserialize.md) | `warn` | `warn` | `error` | `JSON.parse()` on untrusted input without validation |
 | [require-auth-middleware](require-auth-middleware.md) | `warn` | `warn` | `error` | Express/Fastify routes without auth middleware |
 | [require-authz-check](require-authz-check.md) | `warn` | `warn` | `error` | No ownership check when accessing resources by ID |
+| [no-client-exposed-secret](no-client-exposed-secret.md) | `error` | `error` | `error` | Server secrets behind public bundler prefixes, in `"use client"` files, or in browser LLM clients |
+| [no-invisible-unicode](no-invisible-unicode.md) | `error` | `error` | `error` | Bidi overrides, zero-width characters and hidden tag text (safe autofix) |
+| [no-unsanitized-html](no-unsanitized-html.md) | `warn` | `error` | `error` | Dynamic values in `innerHTML` / `dangerouslySetInnerHTML` without a sanitizer |
+| [no-undeclared-import](no-undeclared-import.md) | `warn` | `warn` | `error` | Imports of packages not in package.json (hallucinated or phantom) |
 
 ## 🔵 AI Patterns
 
@@ -41,14 +46,18 @@ All 18 rules provided by `eslint-plugin-ai-guard`, organized by category.
 | [no-dead-branch](no-dead-branch.md) | `warn` | `error` | `if (true)`, `x===x`, `x&&!x` — AI scaffolding leftovers that create dead code |
 | [no-duplicate-logic-block](no-duplicate-logic-block.md) | `off` | `error` | Copy-pasted logic blocks that should be extracted |
 | [no-console-in-handler](no-console-in-handler.md) | `off` | `error` | `console.*` inside HTTP route handlers |
+| [no-placeholder-implementation](no-placeholder-implementation.md) | `warn` | `error` | Elided code, TODO-only stubs, not-implemented bodies, mock data in production |
+| [no-tautological-assertion](no-tautological-assertion.md) | `warn` | `error` | Assertions that always pass |
+| [no-assertionless-test](no-assertionless-test.md) | `warn` | `error` | Test cases with no assertion |
+| [no-test-env-branch](no-test-env-branch.md) | `warn` | `error` | Production code that returns a canned result under tests |
 
 ---
 
 ## Preset Comparison
 
-| Preset | Use Case | All 18 Rules? |
+| Preset | Use Case | All 27 Rules? |
 |---|---|---|
 | `recommended` | Start here — low noise, high-value rules enabled | No — off/warn for noisy rules |
 | `strict` | Maximum enforcement — mature codebase | Yes — all at `error` |
 | `security` | Security audit focus | Security rules only |
-| `agent` | AI agent workflows (PostToolUse hooks) | 5 high-signal rules at `error` |
+| `agent` | AI agent workflows (PostToolUse hooks) | 8 high-signal rules at `error` |

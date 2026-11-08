@@ -15,6 +15,10 @@ import {
   type Preset,
 } from '../utils/config-manager.js';
 import { log } from '../utils/logger.js';
+import recommendedConfig from '../../src/configs/recommended.js';
+import strictConfig from '../../src/configs/strict.js';
+import securityConfig from '../../src/configs/security.js';
+import { AGENT_RULES } from '../../src/configs/agent.js';
 import path from 'path';
 
 export function registerPresetCommand(program: Command): void {
@@ -90,38 +94,9 @@ export function registerPresetCommand(program: Command): void {
       log.blank();
       log.section('Preset Details');
 
-      const presetDetails: Record<Preset, Array<{ rule: string; level: string }>> = {
-        recommended: [
-          { rule: 'no-empty-catch', level: chalk.red('error') },
-          { rule: 'no-floating-promise', level: chalk.red('error') },
-          { rule: 'no-hardcoded-secret', level: chalk.red('error') },
-          { rule: 'no-eval-dynamic', level: chalk.red('error') },
-          { rule: 'no-broad-exception', level: chalk.yellow('warn') },
-          { rule: 'no-async-array-callback', level: chalk.yellow('warn') },
-          { rule: 'no-await-in-loop', level: chalk.yellow('warn') },
-          { rule: '+ 6 more…', level: chalk.gray('warn') },
-        ],
-        strict: [
-          { rule: 'All 18 rules', level: chalk.red('error') },
-        ],
-        security: [
-          { rule: 'no-hardcoded-secret', level: chalk.red('error') },
-          { rule: 'no-eval-dynamic', level: chalk.red('error') },
-          { rule: 'no-sql-string-concat', level: chalk.red('error') },
-          { rule: 'no-unsafe-deserialize', level: chalk.yellow('warn') },
-          { rule: 'require-auth-middleware', level: chalk.yellow('warn') },
-          { rule: 'require-authz-check', level: chalk.yellow('warn') },
-        ],
-        agent: [
-          { rule: 'no-hardcoded-secret', level: chalk.red('error') },
-          { rule: 'no-eval-dynamic', level: chalk.red('error') },
-          { rule: 'no-empty-catch', level: chalk.red('error') },
-          { rule: 'no-sql-string-concat', level: chalk.red('error') },
-          { rule: 'no-floating-promise', level: chalk.red('error') },
-        ],
-      };
+      const presetDetails = describePreset(preset);
 
-      for (const { rule, level } of presetDetails[preset]) {
+      for (const { rule, level } of presetDetails) {
         log.print(`    ${chalk.gray('•')} ${chalk.white(rule).padEnd(32)}${level}`);
       }
 
@@ -129,4 +104,32 @@ export function registerPresetCommand(program: Command): void {
       log.info(`Run ${chalk.cyan('ai-guard run')} to see results with the new preset.`);
       log.blank();
     });
+}
+
+const PRESET_RULES: Record<Preset, Record<string, unknown>> = {
+  recommended: recommendedConfig.rules ?? {},
+  strict: strictConfig.rules ?? {},
+  security: securityConfig.rules ?? {},
+  agent: AGENT_RULES,
+};
+
+/** Rule list shown after switching presets, read from the preset configs themselves. */
+function describePreset(preset: Preset): Array<{ rule: string; level: string }> {
+  const entries = Object.entries(PRESET_RULES[preset]).map(([id, level]) => ({
+    rule: id.replace(/^ai-guard\//, ''),
+    level: String(level),
+  }));
+  const errors = entries.filter((e) => e.level === 'error');
+  const warnings = entries.filter((e) => e.level === 'warn');
+
+  if (warnings.length === 0 && errors.length > 12) {
+    return [{ rule: `All ${errors.length} rules`, level: chalk.red('error') }];
+  }
+  const rows = errors.map((e) => ({ rule: e.rule, level: chalk.red('error') }));
+  if (warnings.length > 8) {
+    rows.push({ rule: `+ ${warnings.length} more`, level: chalk.yellow('warn') });
+  } else {
+    rows.push(...warnings.map((e) => ({ rule: e.rule, level: chalk.yellow('warn') })));
+  }
+  return rows;
 }

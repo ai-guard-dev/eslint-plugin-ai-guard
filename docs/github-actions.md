@@ -150,6 +150,10 @@ onboarding ai-guard onto a codebase with existing issues.
 
 ---
 
+## Test Integrity
+
+Set `test-integrity: 'true'` to flag tests the PR deleted, skipped, focused or weakened. It needs the base branch history, so check out with `fetch-depth: 0`. A focused test fails under the default `fail-on: high`; the other findings are annotations unless you use `fail-on: medium`. See [Test integrity](./cli/test-integrity.md).
+
 ## Fail Strategies
 
 | Flag | Behavior |

@@ -32,7 +32,7 @@ Extracts edited file path
         ↓
 Runs AI Guard (agent preset)
         ↓
-Outputs findings to stdout
+Returns findings as additionalContext
         ↓
 Claude Code reads diagnostics
         ↓
@@ -45,6 +45,17 @@ Automatically fixes issues
 4. Findings are output as concise, structured diagnostics
 5. Claude Code reads the diagnostics and can fix issues automatically
 
+## When Claude Finishes
+
+`init-claude` also installs two lifecycle hooks (skip them with `--no-stop-hook`):
+
+- **SessionStart** records the commit the session started from, inside `.git/`, so work Claude already committed is still checked.
+- **Stop** runs [`ai-guard verify`](../cli/verify.md) on everything the session changed.
+
+New blocking findings, and changes that weaken tests, go back to Claude once, with instructions to fix them or tell you. If Claude stops again with issues still open, it is allowed to stop and you see a one-line warning. Each finding is raised once per session, so a false positive can't trap Claude in a loop or nag you on later turns.
+
+Problems that were already in the code don't count. If AI Guard itself fails, the hook stays out of the way.
+
 ## What Gets Checked
 
 The `agent` preset is optimized for speed and precision with near-zero false positives:
@@ -56,6 +67,9 @@ The `agent` preset is optimized for speed and precision with near-zero false pos
 | `no-empty-catch` | Reliability | High |
 | `no-sql-string-concat` | Security | Medium |
 | `no-floating-promise` | Async | High |
+| `no-client-exposed-secret` | Security | High |
+| `no-invisible-unicode` | Security | High |
+| `no-undeclared-import` | Security | High |
 
 Rules like `require-auth-middleware` and `no-await-in-loop` are intentionally excluded — they require cross-file context that's too noisy for per-edit feedback.
 
@@ -78,7 +92,7 @@ npx ai-guard init-claude --local
 
 **What it does:**
 - Creates/updates `.claude/settings.json`
-- Adds a `PostToolUse` hook for `Edit|Write` tool calls
+- Adds a `PostToolUse` hook for `Edit|Write` tool calls, plus `SessionStart` and `Stop` hooks (unless `--no-stop-hook`)
 - Preserves all existing Claude Code settings
 - Idempotent: safe to run multiple times
 

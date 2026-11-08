@@ -3,6 +3,7 @@ import { noEmptyCatch } from './reliability/no-empty-catch';
 import { noBroadException } from './reliability/no-broad-exception';
 import { noCatchLogRethrow } from './reliability/no-catch-log-rethrow';
 import { noCatchWithoutUse } from './reliability/no-catch-without-use';
+import { noSilentFallback } from './reliability/no-silent-fallback';
 
 // ── Async ──────────────────────────────────────────────────────────────────────
 import { noAsyncArrayCallback } from './async/no-async-array-callback';
@@ -18,11 +19,19 @@ import { noSqlStringConcat } from './security/no-sql-string-concat';
 import { noUnsafeDeserialize } from './security/no-unsafe-deserialize';
 import { requireAuthMiddleware } from './security/require-auth-middleware';
 import { requireAuthzCheck } from './security/require-authz-check';
+import { noClientExposedSecret } from './security/no-client-exposed-secret';
+import { noInvisibleUnicode } from './security/no-invisible-unicode';
+import { noUnsanitizedHtml } from './security/no-unsanitized-html';
+import { noUndeclaredImport } from './security/no-undeclared-import';
 
 // ── AI Patterns (was: quality + logic) ────────────────────────────────────────
 import { noConsoleInHandler } from './ai-patterns/no-console-in-handler';
 import { noDuplicateLogicBlock } from './ai-patterns/no-duplicate-logic-block';
 import { noDeadBranch } from './ai-patterns/no-dead-branch';
+import { noPlaceholderImplementation } from './ai-patterns/no-placeholder-implementation';
+import { noTautologicalAssertion } from './ai-patterns/no-tautological-assertion';
+import { noAssertionlessTest } from './ai-patterns/no-assertionless-test';
+import { noTestEnvBranch } from './ai-patterns/no-test-env-branch';
 
 /**
  * All rules exported by the plugin.
@@ -40,6 +49,7 @@ export const allRules = {
   'no-broad-exception': noBroadException,
   'no-catch-log-rethrow': noCatchLogRethrow,
   'no-catch-without-use': noCatchWithoutUse,
+  'no-silent-fallback': noSilentFallback,
   // Async
   'no-async-array-callback': noAsyncArrayCallback,
   'no-floating-promise': noFloatingPromise,
@@ -53,10 +63,18 @@ export const allRules = {
   'no-unsafe-deserialize': noUnsafeDeserialize,
   'require-auth-middleware': requireAuthMiddleware,
   'require-authz-check': requireAuthzCheck,
+  'no-client-exposed-secret': noClientExposedSecret,
+  'no-invisible-unicode': noInvisibleUnicode,
+  'no-unsanitized-html': noUnsanitizedHtml,
+  'no-undeclared-import': noUndeclaredImport,
   // AI Patterns
   'no-console-in-handler': noConsoleInHandler,
   'no-duplicate-logic-block': noDuplicateLogicBlock,
   'no-dead-branch': noDeadBranch,
+  'no-placeholder-implementation': noPlaceholderImplementation,
+  'no-tautological-assertion': noTautologicalAssertion,
+  'no-assertionless-test': noAssertionlessTest,
+  'no-test-env-branch': noTestEnvBranch,
 } as const;
 
 export type RuleKey = keyof typeof allRules;
