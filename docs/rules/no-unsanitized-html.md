@@ -11,7 +11,7 @@ Flags dynamic values written to HTML sinks without sanitizing:
 - `el.innerHTML = …`, `el.innerHTML += …`, `el.outerHTML = …`
 - `el.insertAdjacentHTML(position, …)`
 - `document.write(…)`, `document.writeln(…)`
-- React `dangerouslySetInnerHTML={{ __html: … }}`, including `React.createElement` props and `createMarkup()` helpers
+- React `dangerouslySetInnerHTML` (the `__html` value), including `React.createElement` props and `createMarkup()` helpers
 
 It reports one of four messages:
 
