@@ -2,10 +2,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../src/mcp/create-server';
+
+// These tests run real Git and ESLint processes; the 5 s default is too tight when the suite runs in parallel.
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 
 const tags = (text: string): string => [...text].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
 

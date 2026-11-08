@@ -8,8 +8,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleHookInput, type HookInput } from '../../cli/commands/claude-hook';
+
+// These tests run real Git and ESLint processes; the 5 s default is too tight when the suite runs in parallel.
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 
 let repo: string;
 let stateDir: string;
