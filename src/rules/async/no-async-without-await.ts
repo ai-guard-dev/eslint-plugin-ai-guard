@@ -410,12 +410,7 @@ export const noAsyncWithoutAwait = createRule<[RuleOptions], 'asyncWithoutAwait'
       }
 
       // Check for await
-      const bodyHasAwait =
-        node.body.type === AST_NODE_TYPES.BlockStatement
-          ? containsAwaitExpression(node.body)
-          : node.body.type === AST_NODE_TYPES.AwaitExpression;
-
-      if (bodyHasAwait) {
+      if (containsAwaitExpression(node.body)) {
         return;
       }
 

@@ -87,6 +87,9 @@ All scan tools accept `preset`: `agent` (default), `recommended`, `strict`, or `
 | `ai_guard_rules` | Inspect available rules, severities, and remediation | `{"preset":"agent"}` |
 | `ai_guard_rules` | Look up the rule behind a finding (description, remediation, docs link) | `{"rules":["no-floating-promise"]}` |
 | `ai_guard_check_integrity` | Before finishing: list checks the change weakened (new suppressions, skipped/removed tests, lowered configs, removed CI steps) | `{}` or `{"base":"origin/main"}` |
+| `ai_guard_verify_change` | One verdict before calling work done: introduced lint findings, weakened tests, agent-config issues | `{}` or `{"base":"main"}` |
+| `ai_guard_scan_agent_config` | Check CLAUDE.md, AGENTS.md, skills and MCP config before trusting them | `{"path":"."}` |
+| `ai_guard_fix` | Apply deterministic autofixes to one file; returns a diff, and writes only with `apply` | `{"path":"src/api.ts","apply":false}` |
 
 ### Inline directives
 
@@ -115,6 +118,10 @@ MCP scans never let `eslint-disable` comments hide findings (the `ignore` inline
 `tier: "high"` findings are precise weakenings: when `hasBlockingFindings` is true, fix them or explain them to the user before calling the task done. `tier: "advisory"` findings need judgment and are informational. `clean` is true only for a complete analysis with no findings; parse errors or truncation make the result `partial`.
 
 `ai_guard_rules` returns the rule catalog; selecting a preset additionally returns its enabled `presetRules` IDs. With `rules` (1–25 IDs, `ai-guard/` prefix optional) it returns only those rules, each with `docsUrl`; unknown IDs are listed in `unknownRules` and the call fails.
+
+`ai_guard_verify_change` returns `pass`, `blocking`, `disclosures` and a ready-to-act-on `summary`. `pass: false` means fix `blocking` first; every item in `disclosures` should be reported to the user. A change that could not be fully analyzed is never `pass: true`. Only `ai_guard_fix` with `apply: true` writes to disk; the write is atomic and refused if the file changed in the meantime.
+
+`ai_guard_scan_diff` also returns `testIntegrity` (set `testIntegrity: false` to skip it). A focused test makes the diff not clean.
 
 ### Diff semantics
 
@@ -175,6 +182,7 @@ Each scan error has `code`, `message`, and optional `file`/`line`. Codes include
 3. Resolve scan errors first. An empty findings array on a failed/partial response is not a clean result.
 4. Review findings and apply targeted fixes with the agent's normal editor.
 5. Rescan the same scope and preset. Report completion only when `status:"complete"` and `clean:true`; explain any intentionally unresolved findings.
+6. Before finishing, call `ai_guard_verify_change`, and tell the user about every disclosure.
 
 The server also ships this loop as the MCP prompt `verify_changes` (optional `path` and `preset` arguments). In Claude Code it appears as `/mcp__ai-guard__verify_changes`.
 

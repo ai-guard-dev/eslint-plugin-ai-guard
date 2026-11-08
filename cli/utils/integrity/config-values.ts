@@ -50,7 +50,7 @@ export function parseJsonc(text: string): unknown {
     }
     out += ch;
   }
-  return JSON.parse(stripTrailingCommas(out).replace(/^﻿/, ''));
+  return JSON.parse(stripTrailingCommas(out).replace(/^\uFEFF/, ''));
 }
 
 /** Remove commas that directly precede `}` or `]`, outside of strings. */

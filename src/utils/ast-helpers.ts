@@ -20,6 +20,43 @@ export function isAsyncFunction(
   );
 }
 
+function isFunctionNode(node: TSESTree.Node): boolean {
+  return (
+    node.type === 'FunctionDeclaration' ||
+    node.type === 'FunctionExpression' ||
+    node.type === 'ArrowFunctionExpression'
+  );
+}
+
+/**
+ * True if `predicate` matches `node` or any descendant. With `skipFunctions`,
+ * nested function bodies are not entered (their awaits/returns are their own).
+ */
+export function someDescendant(
+  node: TSESTree.Node,
+  predicate: (n: TSESTree.Node) => boolean,
+  options: { skipFunctions?: boolean } = {}
+): boolean {
+  const stack: TSESTree.Node[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop() as TSESTree.Node;
+    if (predicate(current)) return true;
+    if (options.skipFunctions && current !== node && isFunctionNode(current)) continue;
+    for (const key of Object.keys(current)) {
+      if (key === 'parent') continue;
+      const value = (current as unknown as Record<string, unknown>)[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item && typeof item === 'object' && 'type' in item) stack.push(item as TSESTree.Node);
+        }
+      } else if (value && typeof value === 'object' && 'type' in value) {
+        stack.push(value as TSESTree.Node);
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Array method names that iterate over elements.
  */

@@ -36,12 +36,13 @@ describe('MCP structured output', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('declares output schemas and read-only annotations for every tool', async () => {
+  it('declares output schemas for every tool, and read-only annotations for all but fix', async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(8);
     for (const tool of tools) {
       expect(tool.outputSchema?.type).toBe('object');
-      expect(tool.annotations?.readOnlyHint).toBe(true);
+      // ai_guard_fix writes when apply=true, so it must not claim to be read-only.
+      expect(tool.annotations?.readOnlyHint).toBe(tool.name !== 'ai_guard_fix');
     }
   });
 
@@ -102,7 +103,7 @@ describe('MCP structured output', () => {
   it('derives preset maps from the canonical preset configs', () => {
     const { rules } = getRules({});
     const enabledIn = (preset: string): number => rules.filter(r => r.severity[preset] !== 'off').length;
-    expect([enabledIn('recommended'), enabledIn('strict'), enabledIn('security'), enabledIn('agent')]).toEqual([13, 18, 6, 5]);
+    expect([enabledIn('recommended'), enabledIn('strict'), enabledIn('security'), enabledIn('agent')]).toEqual([22, 27, 11, 8]);
   });
 
   it('serves the verify_changes prompt', async () => {

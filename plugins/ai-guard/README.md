@@ -4,11 +4,12 @@
 
 AI Guard adds deterministic static analysis for JavaScript and TypeScript to Claude Code. It catches bugs that AI-generated code often contains: floating promises, async callbacks passed to array methods, empty catch blocks, hardcoded secrets, SQL built by string concatenation, dynamic `eval`, unsafe deserialization, and missing auth middleware. Claude scans your changes, fixes each finding with its normal editing tools, and rescans until the scan is complete and clean.
 
-The analysis runs on your machine using the open-source [`eslint-plugin-ai-guard`](https://github.com/ai-guard-dev/eslint-plugin-ai-guard) engine (MIT). AI Guard's tools only read code and report findings; they never modify files.
+The analysis runs on your machine using the open-source [`eslint-plugin-ai-guard`](https://github.com/ai-guard-dev/eslint-plugin-ai-guard) engine (MIT). AI Guard's tools read code and report findings. The one exception is `ai_guard_fix`, which writes only when called with `apply: true`.
 
 ## What's included
 
 - **MCP server** `ai-guard`: the `ai-guard-mcp` server from `eslint-plugin-ai-guard@1.4.2`, started with Node over local STDIO for the current project. Its dependencies are pinned in this plugin's `package-lock.json` (`eslint-plugin-ai-guard@1.4.2`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0`).
+- **Hooks**: findings reach Claude after each JS/TS edit, and the whole change is verified when Claude finishes. New blocking issues and weakened tests go back to Claude once; anything still open is shown to you as a one-line warning. Because plugin hooks run with the bundled rules in isolated mode, inline `eslint-disable` comments are not honored there, so an agent cannot silence a finding by adding one.
 - **Skill** `/ai-guard:verify-changes [file-or-directory] [preset]`: the scan → fix → rescan workflow. Claude can also invoke it on its own after editing JS/TS code.
 
 | Tool | Use |
@@ -17,8 +18,11 @@ The analysis runs on your machine using the open-source [`eslint-plugin-ai-guard
 | `ai_guard_scan_file` | Scan one file |
 | `ai_guard_scan_project` | Scan a directory (up to 500 files) |
 | `ai_guard_rules` | List rules and presets, or look up a rule's description, fix and docs link |
+| `ai_guard_verify_change` | One verdict for the change: introduced findings, weakened tests, agent-config issues |
+| `ai_guard_scan_agent_config` | Check CLAUDE.md, AGENTS.md, skills and MCP config for hidden text and prompt injection |
+| `ai_guard_fix` | Apply deterministic autofixes to one file; returns a diff, and writes only with `apply: true` |
 
-Presets: `agent` (default, 5 high-confidence rules), `recommended`, `strict`, `security`.
+Presets: `agent` (default, 8 high-confidence rules), `recommended`, `strict`, `security`.
 
 ## Requirements
 

@@ -41,6 +41,7 @@
 
 import { createHash } from 'crypto';
 import { integritySarifRules, sarifLevelFor } from './integrity/report.js';
+import { virtualRules } from './check-catalog.js';
 import path from 'path';
 import type { RunResult, IssueDetail, FileResult } from './eslint-runner.js';
 import { ISSUE_CONFIDENCE, ISSUE_CATEGORY, ISSUE_ASYNC_RISK_TYPE, ISSUE_REMEDIATION } from './eslint-runner.js';
@@ -171,7 +172,7 @@ export const FINGERPRINT_KEY = 'ai-guard/v1';
 // sanitizeSarifTags() before emission. This prevents schema violations when
 // a category tag (e.g. "async-reliability") is already present in base tags.
 
-const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
+export const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
   'ai-guard/no-empty-catch':          { shortDesc: 'Empty catch block silently swallows errors', tags: ['reliability'] },
   'ai-guard/no-broad-exception':      { shortDesc: 'Catching broad Exception/Error masks specific failures', tags: ['reliability'] },
   'ai-guard/no-catch-log-rethrow':    { shortDesc: 'Catch block logs and rethrows — use one or the other', tags: ['reliability'] },
@@ -190,9 +191,30 @@ const RULE_DOCS: Record<string, { shortDesc: string; tags: string[] }> = {
   'ai-guard/no-console-in-handler':   { shortDesc: 'console.log in request handler — use structured logging', tags: ['ai-patterns'] },
   'ai-guard/no-duplicate-logic-block':{ shortDesc: 'Duplicate logic block detected', tags: ['ai-patterns'] },
   'ai-guard/no-dead-branch':          { shortDesc: 'Dead code branch that can never execute', tags: ['ai-patterns'] },
+  'ai-guard/no-client-exposed-secret': { shortDesc: 'Server secret exposed to the browser', tags: ['security', 'secrets'] },
+  'ai-guard/no-invisible-unicode': { shortDesc: 'Invisible or bidirectional Unicode character in source', tags: ['security', 'trojan-source'] },
+  'ai-guard/no-undeclared-import': { shortDesc: 'Import of a package not declared in package.json', tags: ['security', 'supply-chain'] },
+  'ai-guard/no-unsanitized-html': { shortDesc: 'Unsanitized value written to an HTML sink (XSS)', tags: ['security', 'xss', 'injection'] },
+  'ai-guard/no-silent-fallback': { shortDesc: 'Fallback hides a missing secret or a failed call', tags: ['reliability'] },
+  'ai-guard/no-placeholder-implementation': { shortDesc: 'Placeholder or elided code left by an AI agent', tags: ['ai-patterns'] },
+  'ai-guard/no-tautological-assertion': { shortDesc: 'Assertion that always passes', tags: ['ai-patterns', 'testing'] },
+  'ai-guard/no-assertionless-test': { shortDesc: 'Test case without any assertion', tags: ['ai-patterns', 'testing'] },
+  'ai-guard/no-test-env-branch': { shortDesc: 'Production code returns a canned result under tests', tags: ['ai-patterns', 'testing'] },
 };
 
 const BASE_DOCS_URL = 'https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules';
+const DOCS_ROOT_URL = 'https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs';
+const VIRTUAL_RULES = virtualRules();
+for (const [id, meta] of Object.entries(VIRTUAL_RULES)) {
+  RULE_DOCS[id] ??= { shortDesc: meta.shortDesc, tags: meta.tags };
+}
+
+/** Docs page for a rule; virtual rules (agent-config, test-integrity) link to their CLI docs. */
+function ruleDocsUrl(ruleId: string): string {
+  const virtual = VIRTUAL_RULES[ruleId];
+  if (virtual) return `${DOCS_ROOT_URL}/${virtual.docs}`;
+  return `${BASE_DOCS_URL}/${ruleId.replace('ai-guard/', '')}.md`;
+}
 
 // ─── SARIF Sanitizer ──────────────────────────────────────────────────────────
 //
@@ -462,7 +484,7 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
       '',
       remediation ? `**Fix:** ${remediation}` : '',
       '',
-      `[View rule documentation](${BASE_DOCS_URL}/${shortName}.md)`,
+      `[View rule documentation](${ruleDocsUrl(id)})`,
     ].filter(Boolean).join('\n');
 
     return sanitizeSarifRule({
@@ -477,7 +499,7 @@ function buildRuleDescriptors(ruleIds: string[]): SarifReportingDescriptor[] {
         text: remediation ?? meta?.shortDesc ?? shortName,
         markdown: helpMarkdown,
       },
-      helpUri: `${BASE_DOCS_URL}/${shortName}.md`,
+      helpUri: ruleDocsUrl(id),
       defaultConfiguration: {
         level: confidenceToSarifLevel(confidence),
       },
@@ -692,6 +714,8 @@ export function buildSarifLog(
   result: RunResult,
   version = PKG_VERSION,
   repoRoot?: string,
+  /** Code Scanning slot. Only separate scans (e.g. agent-config) pass a different ID. */
+  automationId: string = SARIF_AUTOMATION_ID,
 ): SarifLog {
   const usedRuleIds = collectUsedRuleIds(result);
   const rules = buildRuleDescriptors(usedRuleIds);
@@ -748,7 +772,7 @@ export function buildSarifLog(
         // Groups all ai-guard scan runs into one persistent analysis slot.
         // MUST remain "ai-guard" forever — changing this orphans all existing alerts.
         automationDetails: {
-          id: SARIF_AUTOMATION_ID,
+          id: automationId,
         },
         results: sarifResults,
         properties: {

@@ -12,6 +12,7 @@
  *   ai-guard changed --path packages/web  # Filter to subdirectory (monorepo)
  *   ai-guard changed --pr --baseline  # Report only findings not in .ai-guard-baseline.json
  *   ai-guard changed --pr --integrity enforce  # Also fail on weakened checks (skips, suppressions, …)
+ *   ai-guard changed --test-integrity     # Also flag deleted, skipped, focused or weakened tests
  */
 
 import type { Command } from 'commander';
@@ -35,10 +36,12 @@ import {
 import { BASELINE_FILE, filterBaselinedIssues, loadBaseline, resolveBaselinePath } from '../utils/baseline.js';
 import { PKG_VERSION } from '../utils/version.js';
 import { formatIssueCount, renderIssuesByFile, renderSuppressedIssues, partitionByTier, buildSignalSummary, resolveExitCode } from './run.js';
-import type { RunResult } from '../utils/eslint-runner.js';
+import type { RunResult, FileResult } from '../utils/eslint-runner.js';
+import { ISSUE_CATEGORY, ISSUE_REMEDIATION } from '../utils/eslint-runner.js';
 import { isIntegrityOption, runCliIntegrity, type IntegrityOption } from '../utils/integrity/run.js';
 import { integrityExitCode, type IntegrityEnvelope } from '../utils/integrity/types.js';
 import { integrityJson, integrityTextLines } from '../utils/integrity/report.js';
+import { analyzeTestIntegrity, type TestIntegrityReport } from '../utils/test-integrity.js';
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 
@@ -66,6 +69,7 @@ export function registerChangedCommand(program: Command): void {
       (v: string) => Number.parseInt(v, 10))
     .option('--verbose', 'Expand all findings (disable grouping)')
     .option('--quiet', 'Show errors only')
+    .option('--test-integrity', 'Also check whether the change weakened tests (deleted, skipped, focused, or less-asserted tests)')
     .option('--debug-timing', 'Print per-phase timing diagnostics')
     .option('--debug-git', 'Print full git resolution trace (useful for diagnosing zero-file issues)')
     .option('--debug-ci', 'Print CI environment state (GITHUB_* vars, SARIF path, summary path)')
@@ -98,6 +102,7 @@ export function registerChangedCommand(program: Command): void {
       debugSarif?: boolean;
       debugSarifPaths?: boolean;
       debugSarifPersistence?: boolean;
+      testIntegrity?: boolean;
     }) => {
       if (!isIntegrityOption(opts.integrity)) {
         log.error(`Unknown --integrity '${opts.integrity}'. Valid modes: off, report, enforce`);
@@ -219,10 +224,35 @@ export function registerChangedCommand(program: Command): void {
         debug: opts.debugGit,
       });
 
+      // ── Test integrity (independent of which JS/TS files changed) ────────────
+      let integrity: TestIntegrityReport | null = null;
+      if (opts.testIntegrity) {
+        try {
+          integrity = await analyzeTestIntegrity({
+            cwd,
+            base: changedResult.mode === 'pr-diff' ? baseRef : undefined,
+            staged: opts.staged,
+          });
+        } catch (err) {
+          integrity = { base: baseRef ?? 'HEAD', findings: [], testFilesAnalyzed: 0, errors: [{ file: '', message: err instanceof Error ? err.message : String(err) }] };
+        }
+      }
+
       // ── Debug git output ─────────────────────────────────────────────────────
       if (opts.debugGit) {
         const { printGitDebug } = await import('../utils/debug.js');
         printGitDebug(changedResult);
+      }
+
+      if (changedResult.files.length === 0 && integrity && integrity.findings.length > 0) {
+        spinner?.stop();
+        const empty: RunResult = {
+          files: [], totalErrors: 0, totalWarnings: 0, totalIssues: 0, filesScanned: 0, ruleBreakdown: new Map(),
+          topFiles: [], durationMs: 0, ecosystemIssues: [], parserErrors: [], ignoredFiles: [], tsParserAvailable: true,
+        };
+        const scanModeEmpty: 'full' | 'changed' | 'staged' = changedResult.mode === 'staged' ? 'staged' : 'changed';
+        handleResults(mergeTestIntegrity(empty, integrity, cwd), opts, preset, scanModeEmpty, 0, inCI, resolvedSarifPath, baseline, integrity);
+        return;
       }
 
       if (changedResult.files.length === 0) {
@@ -276,6 +306,7 @@ export function registerChangedCommand(program: Command): void {
           if (!opts.debugGit) {
             log.print(chalk.dim('     Run with --debug-git for full git resolution trace.'));
           }
+          if (integrity) printIntegrityStatus(integrity);
           log.blank();
         } else if (opts.json) {
           console.log(JSON.stringify({
@@ -314,7 +345,7 @@ export function registerChangedCommand(program: Command): void {
 
       const scanMode: 'full' | 'changed' | 'staged' =
         changedResult.mode === 'staged' ? 'staged' : 'changed';
-      handleResults(result, opts, preset, scanMode, changedResult.files.length, inCI, resolvedSarifPath, baseline);
+      handleResults(integrity ? mergeTestIntegrity(result, integrity, cwd) : result, opts, preset, scanMode, changedResult.files.length, inCI, resolvedSarifPath, baseline, integrity);
     });
 }
 
@@ -351,6 +382,7 @@ function handleResults(
   inCI: boolean,
   resolvedSarifPath?: string,
   baseline?: BaselineContext,
+  integrity: TestIntegrityReport | null = null,
 ): void {
   // ── Baseline filtering ─────────────────────────────────────────────────────
   // Everything downstream (annotations, summary, SARIF, JSON, exit code) sees
@@ -372,7 +404,9 @@ function handleResults(
   if (opts.sarif) {
     // Resolve repo root — in GitHub Actions GITHUB_WORKSPACE is the checkout root.
     const repoRoot = process.env.GITHUB_WORKSPACE ?? undefined;
-    const sarifLog = buildSarifLog(result, undefined, repoRoot);
+    // Code Scanning cannot anchor alerts to files that no longer exist (deleted test files).
+    const sarifResult = { ...result, files: result.files.filter((f) => fs.existsSync(path.resolve(f.filePath))) };
+    const sarifLog = buildSarifLog(sarifResult, undefined, repoRoot);
     const sarifJson = sarifToJson(sarifLog);
 
     // --debug-sarif: print SARIF metadata and tag trace to stderr
@@ -495,6 +529,7 @@ function handleResults(
       baseline: baseline
         ? { path: baseline.path, mode: baseline.file.mode, preset: baseline.file.preset, suppressed: baselineSuppressed }
         : undefined,
+      ...(integrity ? { testIntegrity: integrity } : {}),
     };
     console.log(JSON.stringify(jsonOutput, null, 2));
     process.exit(getFailOnExitCode(result, opts.failOn, opts.maxWarnings));
@@ -512,6 +547,7 @@ function handleResults(
     ? `${changedFilesCount} changed`
     : '';
 
+  // log.summary was renamed to log.scanStats; this call crashed human-readable `changed` output.
   log.scanStats(
     result.filesScanned,
     result.files.filter((f) => f.issues.length > 0).length,
@@ -524,6 +560,7 @@ function handleResults(
       `Baseline ${chalk.white(baseline.path)}: ${baselineSuppressed} existing finding${baselineSuppressed !== 1 ? 's' : ''} hidden — showing only new findings`,
     );
   }
+  if (integrity) printIntegrityStatus(integrity);
 
   if (result.totalIssues === 0) {
     log.blank();
@@ -648,4 +685,76 @@ function renderIntegrity(envelope: IntegrityEnvelope): void {
     else log.print(`  ${chalk.gray(line)}`);
   }
   log.blank();
+}
+
+// ─── Test integrity ───────────────────────────────────────────────────────────
+
+/** Adds test-integrity findings to a lint result as ai-guard/test-integrity/* issues. */
+export function mergeTestIntegrity(result: RunResult, integrity: TestIntegrityReport, cwd: string): RunResult {
+  if (integrity.findings.length === 0) return result;
+  const root = integrityRoot(cwd);
+  const files = new Map<string, FileResult>(result.files.map((f) => [path.resolve(f.filePath), { ...f, issues: [...f.issues] }]));
+  const ruleBreakdown = new Map(result.ruleBreakdown);
+  let totalErrors = result.totalErrors;
+  let totalWarnings = result.totalWarnings;
+
+  for (const finding of integrity.findings) {
+    const abs = path.resolve(root, finding.file);
+    let file = files.get(abs);
+    if (!file) {
+      file = { filePath: path.relative(cwd, abs), issues: [], errorCount: 0, warningCount: 0 };
+      files.set(abs, file);
+    }
+    const ruleId = `ai-guard/test-integrity/${finding.check}`;
+    const severity = finding.severity === 'error' ? 2 : 1;
+    const details = finding.details?.length ? ` [${finding.details.join('; ')}]` : '';
+    file.issues.push({
+      ruleId,
+      severity,
+      message: finding.message + details,
+      line: finding.line,
+      column: 1,
+      confidence: finding.severity === 'error' ? 'high' : 'medium',
+      category: ISSUE_CATEGORY[ruleId],
+      remediation: ISSUE_REMEDIATION[ruleId],
+    });
+    if (severity === 2) {
+      file.errorCount++;
+      totalErrors++;
+    } else {
+      file.warningCount++;
+      totalWarnings++;
+    }
+    ruleBreakdown.set(ruleId, (ruleBreakdown.get(ruleId) ?? 0) + 1);
+  }
+
+  const merged = [...files.values()];
+  return {
+    ...result,
+    files: merged,
+    totalErrors,
+    totalWarnings,
+    totalIssues: totalErrors + totalWarnings,
+    ruleBreakdown,
+    topFiles: merged.map((f) => ({ path: f.filePath, count: f.issues.length })).filter((f) => f.count > 0).sort((a, b) => b.count - a.count).slice(0, 5),
+  };
+}
+
+function integrityRoot(cwd: string): string {
+  try {
+    return path.resolve(require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
+  } catch {
+    return cwd;
+  }
+}
+
+function printIntegrityStatus(integrity: TestIntegrityReport): void {
+  for (const error of integrity.errors) {
+    log.warn(`Test integrity: ${error.message}${error.file ? ` (${error.file})` : ''}`);
+  }
+  if (integrity.findings.length === 0 && integrity.errors.length === 0) {
+    log.print(`  ${chalk.green('✔')}  Test integrity: no weakened, skipped or focused tests (${integrity.testFilesAnalyzed} test file${integrity.testFilesAnalyzed === 1 ? '' : 's'} vs ${integrity.base})`);
+  } else if (integrity.findings.length > 0) {
+    log.print(`  ${chalk.yellow('!')}  Test integrity: ${integrity.findings.length} finding${integrity.findings.length === 1 ? '' : 's'} vs ${integrity.base} (listed with the issues below)`);
+  }
 }

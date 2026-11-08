@@ -11,7 +11,7 @@ AI Guard integrates with [Claude Code](https://code.claude.com/docs/en/hooks) th
 |---|---|
 | **PostToolUse** (`Edit\|MultiEdit\|Write`) | Lints the edited JS/TS file and checks that file for newly weakened checks. Findings are sent back to Claude. |
 | **SessionStart** | Records the working tree as the session's [check-integrity](../integrity.md) base. |
-| **Stop** | Before Claude finishes, runs check integrity on everything changed since the session started. High-confidence weakenings block stopping **once**. |
+| **Stop** | Before Claude finishes, runs check integrity on everything changed since the session started, then [verifies](../cli/verify.md) the lint findings and agent-config issues the session introduced. Each blocks stopping **once**. |
 | **PreToolUse** (`Bash`) | Asks for confirmation before commands that skip Git hooks (`git commit --no-verify`, `HUSKY=0 git …`). |
 
 ## Quick Setup
@@ -51,6 +51,8 @@ The edit has already happened when PostToolUse runs, so `"decision": "block"` do
   "reason": "Before finishing: your changes weaken checks the project relies on (compared with the working tree at session start).\n- src/cart.test.ts:14 [integrity-test-skipped] Skipped the existing test \"cart > applies the discount\"; it no longer runs.\n  Fix: Remove `.skip`/`x` and fix the code or the test …"
 }
 ```
+
+The Stop hook also runs the checks from [`ai-guard verify`](../cli/verify.md) that check integrity does not cover: lint findings on lines the session added or edited (for example placeholder code or a canned return under a test runner), and issues in agent-config files such as `CLAUDE.md` and `.mcp.json`. These block once per finding, in the same `decision: "block"` form. Files you changed before the session started, and problems that were already in the code, are not attributed to Claude. Weakened tests are reported only by check integrity, never twice.
 
 To avoid trapping Claude in a loop:
 
@@ -102,6 +104,9 @@ The `agent` preset (high-precision lint rules):
 | `no-empty-catch` | Reliability | High |
 | `no-sql-string-concat` | Security | Medium |
 | `no-floating-promise` | Async | High |
+| `no-client-exposed-secret` | Security | High |
+| `no-invisible-unicode` | Security | High |
+| `no-undeclared-import` | Security | High |
 
 Inline directives use the `require-reason` policy in the hook. `// eslint-disable-next-line ai-guard/no-empty-catch -- <reason>` hides a finding, but a directive without a reason does not, and Claude is told why.
 
@@ -115,7 +120,7 @@ The per-edit integrity check covers the edited file: new suppressions, skipped o
 npx ai-guard init-claude                  # all hooks
 npx ai-guard init-claude --dry-run        # preview
 npx ai-guard init-claude --local          # .claude/settings.local.json
-npx ai-guard init-claude --no-stop-hook   # skip SessionStart + Stop
+npx ai-guard init-claude --no-stop-hook   # skip SessionStart + Stop (and the introduced-issues check)
 npx ai-guard init-claude --no-bash-guard  # skip the PreToolUse Bash guard
 ```
 

@@ -6,7 +6,7 @@ import { createTempRepo, type TempRepo } from '../helpers/git-repo';
 import { checkIntegrity } from '../../src/mcp/tools/check-integrity';
 import { addIntegrityAcceptances, loadBaseline, loadIntegrityAcceptances } from '../../cli/utils/baseline';
 
-const TESTS = `describe('cart', () => {\n  it('adds', () => { expect(1).toBe(1); });\n});\n`;
+const TESTS = `describe('cart', () => {\n  it('adds', () => { expect(cart(1)).toBe(1); });\n});\n`;
 
 let repo: TempRepo | null = null;
 afterEach(() => { repo?.cleanup(); repo = null; });

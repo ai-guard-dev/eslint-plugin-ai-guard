@@ -7,6 +7,8 @@ allowed-tools:
   - mcp__plugin_ai-guard_ai-guard__ai_guard_scan_file
   - mcp__plugin_ai-guard_ai-guard__ai_guard_scan_project
   - mcp__plugin_ai-guard_ai-guard__ai_guard_rules
+  - mcp__plugin_ai-guard_ai-guard__ai_guard_verify_change
+  - mcp__plugin_ai-guard_ai-guard__ai_guard_fix
 ---
 
 # Verify changes with AI Guard
@@ -49,6 +51,12 @@ For every issue: open `file` at `line`, read the surrounding code, and fix the r
 
 Rescan with the same arguments. Repeat steps 2–4 at most 3 times. If findings remain after that, stop and report them.
 
-## 5. Report
+For findings marked `fixable: true`, `ai_guard_fix` with `{"path": "<file>"}` shows the deterministic fix as a diff, and `"apply": true` writes it.
+
+## 5. Verify the whole change
+
+Call `ai_guard_verify_change` `{}`. If `pass` is false, fix `blocking`. Tell the user about every item in `disclosures` (deleted, skipped or weakened tests, agent-config changes), or undo them. Fix the code rather than the tests.
+
+## 6. Report
 
 End with one line: findings fixed, findings remaining, and the final `status`/`clean` values. Say "clean" only when the last scan returned `status: "complete"` and `clean: true`.

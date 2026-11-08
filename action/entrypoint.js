@@ -87,6 +87,7 @@ async function main() {
   const preset          = getInput('preset', 'recommended');
   const failOn          = getInput('fail-on', 'high');
   const changedOnly     = getInput('changed-only', 'true') === 'true';
+  const testIntegrity   = getInput('test-integrity', 'false') === 'true';
   const scanPath        = getInput('path', '.');
   const uploadSarif     = getInput('upload-sarif', 'true') === 'true';
   const workingDir      = getInput('working-directory', '.');
@@ -137,6 +138,10 @@ async function main() {
     cliArgs.push('--base', baseRef);
   } else if (changedOnly && process.env.GITHUB_BASE_REF) {
     cliArgs.push('--pr');
+  }
+
+  if (changedOnly && testIntegrity) {
+    cliArgs.push('--test-integrity');
   }
 
   cliArgs.push('--path', scanPath);

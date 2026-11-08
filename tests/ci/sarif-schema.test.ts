@@ -31,6 +31,7 @@ import {
   debugSarifPath,
 } from '../../cli/utils/sarif.js';
 import type { RunResult } from '../../cli/utils/eslint-runner.js';
+import { ISSUE_CATEGORY } from '../../cli/utils/eslint-runner.js';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,10 @@ const SECURITY_RULES = [
   'ai-guard/no-unsafe-deserialize',
   'ai-guard/require-auth-middleware',
   'ai-guard/require-authz-check',
+  'ai-guard/no-client-exposed-secret',
+  'ai-guard/no-invisible-unicode',
+  'ai-guard/no-unsanitized-html',
+  'ai-guard/no-undeclared-import',
 ];
 
 const ALL_RULES = [
@@ -92,6 +97,11 @@ const ALL_RULES = [
   'ai-guard/no-console-in-handler',
   'ai-guard/no-duplicate-logic-block',
   'ai-guard/no-dead-branch',
+  'ai-guard/no-silent-fallback',
+  'ai-guard/no-placeholder-implementation',
+  'ai-guard/no-tautological-assertion',
+  'ai-guard/no-assertionless-test',
+  'ai-guard/no-test-env-branch',
 ];
 
 // ─── sanitizeSarifTags unit tests ─────────────────────────────────────────────
@@ -201,7 +211,7 @@ describe('REGRESSION: no duplicate tags in async rules (GitHub upload failure)',
 // ─── ALL rules: no duplicates ─────────────────────────────────────────────────
 
 describe('No duplicate tags in any rule (full rule coverage)', () => {
-  it('all 18 rules produce unique tags', () => {
+  it('all 27 rules produce unique tags', () => {
     const sarif = buildSarifLog(makeResult(ALL_RULES));
     const violations: Array<{ ruleId: string; tags: string[] }> = [];
 
@@ -495,8 +505,8 @@ describe('GitHub Code Scanning compatibility', () => {
       // Every rule must have correctness and reliability
       expect(tags).toContain('correctness');
       expect(tags).toContain('reliability');
-      // Only security rules must have security tag
-      if (rule.id.includes('secret') || rule.id.includes('eval') || rule.id.includes('sql') || rule.id.includes('deserialize') || rule.id.includes('auth')) {
+      // Only security rules must have the security tag (GitHub files those as security alerts)
+      if (ISSUE_CATEGORY[rule.id] === 'Security') {
         expect(tags).toContain('security');
       } else {
         expect(tags).not.toContain('security');

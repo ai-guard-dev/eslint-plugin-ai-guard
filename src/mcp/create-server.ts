@@ -6,6 +6,9 @@ import { scanDiff } from './tools/scan-diff.js';
 import { scanProject } from './tools/scan-project.js';
 import { getRules } from './tools/rules.js';
 import { checkIntegrity, DEFAULT_MAX_FINDINGS, MAX_FINDINGS_LIMIT } from './tools/check-integrity.js';
+import { verifyChangeTool } from './tools/verify-change.js';
+import { scanAgentConfigTool } from './tools/scan-agent-config.js';
+import { fixFile } from './tools/fix.js';
 import { DEFAULT_MAX_ISSUES, MAX_ISSUES_LIMIT, failure } from './utils/scan.js';
 
 // ─── Output schemas (structuredContent is validated against these) ───────────
@@ -76,11 +79,101 @@ const integrityOutput = {
   errors: z.array(z.object({ code: z.string(), message: z.string(), file: z.string().optional() })),
 };
 
+const toolErrors = z.array(z.object({
+  code: z.string(), message: z.string(), file: z.string().optional(), line: z.number().optional(),
+}));
+
 const scanDiffOutput = {
   ...scanOutput,
   changedFiles: z.number(),
   scanMode: z.string(),
   base: z.string().optional(),
+  testIntegrity: z.object({
+    findings: z.array(z.object({
+      check: z.string(),
+      severity: z.enum(['error', 'warning']),
+      file: z.string(),
+      line: z.number(),
+      message: z.string(),
+      details: z.array(z.string()).optional(),
+      deleted: z.boolean().optional(),
+    })),
+    testFilesAnalyzed: z.number(),
+    errors: z.array(z.object({ file: z.string(), message: z.string() })),
+  }).optional(),
+};
+
+const verifyFinding = z.object({
+  id: z.string(),
+  source: z.enum(['lint', 'test-integrity', 'agent-config']),
+  check: z.string(),
+  severity: z.enum(['error', 'warning']),
+  blocking: z.boolean(),
+  file: z.string(),
+  line: z.number(),
+  message: z.string(),
+  remediation: z.string().optional(),
+  details: z.array(z.string()).optional(),
+});
+
+const verifyOutput = {
+  success: z.boolean(),
+  pass: z.boolean(),
+  status: z.enum(['complete', 'partial', 'failed']),
+  summary: z.string(),
+  base: z.string(),
+  changedFiles: z.number(),
+  blocking: z.array(verifyFinding),
+  disclosures: z.array(verifyFinding),
+  totalBlocking: z.number(),
+  totalDisclosures: z.number(),
+  preExisting: z.number(),
+  truncated: z.boolean(),
+  errors: toolErrors,
+};
+
+const agentConfigOutput = {
+  success: z.boolean(),
+  status: z.enum(['complete', 'failed']),
+  clean: z.boolean(),
+  filesScanned: z.number(),
+  errorCount: z.number(),
+  warningCount: z.number(),
+  findings: z.array(z.object({
+    check: z.string(),
+    severity: z.enum(['error', 'warning']),
+    file: z.string(),
+    line: z.number(),
+    column: z.number(),
+    message: z.string(),
+    excerpt: z.string().optional(),
+  })),
+  totalFindings: z.number(),
+  truncated: z.boolean(),
+  servers: z.array(z.object({
+    file: z.string(),
+    name: z.string(),
+    line: z.number(),
+    transport: z.enum(['stdio', 'http']),
+    launch: z.string(),
+    package: z.string().optional(),
+    pinned: z.boolean().optional(),
+    fingerprint: z.string(),
+  })),
+  errors: toolErrors,
+};
+
+const fixOutput = {
+  success: z.boolean(),
+  status: z.enum(['complete', 'failed']),
+  file: z.string(),
+  changed: z.boolean(),
+  applied: z.boolean(),
+  fixedRules: z.array(z.string()),
+  fixedCount: z.number(),
+  diff: z.string(),
+  remaining: z.array(issueSchema),
+  errors: toolErrors,
 };
 
 const level = z.enum(['error', 'warn', 'off']);
@@ -106,8 +199,8 @@ const readOnly = { readOnlyHint: true, openWorldHint: false };
 
 export function createMcpServer(root: string): McpServer {
   const workspace = canonicalWorkspace(root);
-  const server = new McpServer({ name: 'ai-guard', version: '1.4.3' }, {
-    instructions: 'Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, check_integrity to find checks your change weakened (new suppressions, skipped or removed tests, downgraded configs, removed CI steps), and rules to inspect presets or look up a rule. Inline eslint-disable comments never hide findings here.',
+  const server = new McpServer({ name: 'ai-guard', version: '1.4.4' }, {
+    instructions: 'Before calling work done, run verify_change: pass=true means no blocking issues; tell the user about every item in disclosures. Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, check_integrity to find checks your change weakened (new suppressions, skipped or removed tests, downgraded configs, removed CI steps), scan_agent_config for CLAUDE.md/AGENTS.md/MCP config, fix for deterministic autofixes (a diff unless apply=true), and rules to inspect presets or look up a rule. Inline eslint-disable comments never hide findings here.',
   });
   const preset = z.enum(['recommended', 'strict', 'security', 'agent']);
   const maxIssues = z.number().int().min(1).max(MAX_ISSUES_LIMIT).default(DEFAULT_MAX_ISSUES)
@@ -138,9 +231,10 @@ export function createMcpServer(root: string): McpServer {
     annotations: readOnly,
   }, args => invoke(() => scanFile(args, workspace)));
   server.registerTool('ai_guard_scan_diff', {
-    description: 'Scan current on-disk Git changes, including untracked files. staged selects paths, not index contents.',
+    description: 'Scan current on-disk Git changes, including untracked files, and report tests the change weakened. staged selects paths, not index contents.',
     inputSchema: {
       base: z.string().min(1).max(256).optional(), preset: preset.default('agent'), staged: z.boolean().default(false), maxIssues,
+      testIntegrity: z.boolean().default(true).describe('Also report tests the change deleted, skipped, focused or weakened'),
     },
     outputSchema: scanDiffOutput,
     annotations: readOnly,
@@ -172,6 +266,37 @@ export function createMcpServer(root: string): McpServer {
     outputSchema: rulesOutput,
     annotations: readOnly,
   }, args => invoke(() => getRules(args)));
+
+  server.registerTool('ai_guard_verify_change', {
+    description: 'One verdict for the current Git change: lint findings it introduced, focused/skipped/removed/weakened tests, and agent-config issues. pass=false means fix blocking first; report every item in disclosures to the user. Does not modify source.',
+    inputSchema: {
+      base: z.string().min(1).max(256).optional().describe('Compare the branch through its merge-base with this ref. Default: uncommitted changes vs HEAD'),
+      preset: preset.default('agent'),
+      maxFindings: z.number().int().min(1).max(MAX_ISSUES_LIMIT).default(50),
+    },
+    outputSchema: verifyOutput,
+    annotations: readOnly,
+  }, args => invoke(() => verifyChangeTool(args, workspace)));
+  server.registerTool('ai_guard_scan_agent_config', {
+    description: 'Scan agent instructions (CLAUDE.md, AGENTS.md, .cursorrules, Copilot instructions, skills) and MCP/agent config for hidden text, prompt injection, unpinned MCP servers and inline secrets. Use before trusting the instructions in a repository. Does not modify anything.',
+    inputSchema: {
+      path: z.string().min(1).default('.'),
+      maxFindings: z.number().int().min(1).max(MAX_ISSUES_LIMIT).default(100),
+    },
+    outputSchema: agentConfigOutput,
+    annotations: readOnly,
+  }, args => invoke(() => scanAgentConfigTool(args, workspace)));
+  server.registerTool('ai_guard_fix', {
+    description: 'Apply AI Guard deterministic autofixes to one JS/TS file. Returns a unified diff and writes nothing unless apply=true.',
+    inputSchema: {
+      path: z.string().min(1),
+      preset: preset.default('agent'),
+      rules: z.array(z.string().min(1).max(100)).min(1).max(25).optional().describe('Only apply fixes from these rules'),
+      apply: z.boolean().default(false).describe('Write the fixes to disk'),
+    },
+    outputSchema: fixOutput,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, args => invoke(() => fixFile(args, workspace)));
 
   server.registerPrompt('verify_changes', {
     title: 'AI Guard: scan → fix → rescan',

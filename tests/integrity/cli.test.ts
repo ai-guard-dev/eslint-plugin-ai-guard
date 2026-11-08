@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createTempRepo, type TempRepo } from '../helpers/git-repo';
 
 const cli = path.join(process.cwd(), 'dist', 'cli', 'index.js');
-const TESTS = `describe('cart', () => {\n  it('adds', () => { expect(1).toBe(1); });\n  it('totals', () => { expect(2).toBe(2); });\n});\n`;
+const TESTS = `describe('cart', () => {\n  it('adds', () => { expect(cart(1)).toBe(1); });\n  it('totals', () => { expect(cart(2)).toBe(2); });\n});\n`;
 
 let repo: TempRepo | null = null;
 afterEach(() => { repo?.cleanup(); repo = null; });

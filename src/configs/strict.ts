@@ -11,6 +11,7 @@ const strict: TSESLint.ClassicConfig.Config = {
     'ai-guard/no-broad-exception': 'error',
     'ai-guard/no-catch-log-rethrow': 'error',
     'ai-guard/no-catch-without-use': 'error',
+    'ai-guard/no-silent-fallback': 'error',
     // Async - all at error
     'ai-guard/no-async-array-callback': 'error',
     'ai-guard/no-floating-promise': 'error',
@@ -24,10 +25,18 @@ const strict: TSESLint.ClassicConfig.Config = {
     'ai-guard/no-unsafe-deserialize': 'error',
     'ai-guard/require-auth-middleware': 'error',
     'ai-guard/require-authz-check': 'error',
+    'ai-guard/no-client-exposed-secret': 'error',
+    'ai-guard/no-invisible-unicode': 'error',
+    'ai-guard/no-unsanitized-html': 'error',
+    'ai-guard/no-undeclared-import': 'error',
     // AI Patterns - all at error
     'ai-guard/no-console-in-handler': 'error',
     'ai-guard/no-duplicate-logic-block': 'error',
     'ai-guard/no-dead-branch': 'error',
+    'ai-guard/no-placeholder-implementation': 'error',
+    'ai-guard/no-tautological-assertion': 'error',
+    'ai-guard/no-assertionless-test': 'error',
+    'ai-guard/no-test-env-branch': 'error',
   },
 };
 

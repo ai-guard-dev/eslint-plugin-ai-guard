@@ -14,9 +14,11 @@
  *    tool result; advisories go to `additionalContext`.
  *  Stop
  *    Runs check-integrity analysis on everything changed since the session
- *    started. High-confidence findings block stopping once per unique finding
- *    set per session (`decision: "block"`); after that, or for advisories, the
- *    user is informed with `systemMessage` so Claude is never trapped in a loop.
+ *    started, then verifies the change itself (`ai-guard verify`: lint findings
+ *    on lines the session added or edited, and agent-config issues). Blocking
+ *    findings stop Claude once per unique finding (`decision: "block"`); after
+ *    that, or for advisories, the user is informed with `systemMessage` so
+ *    Claude is never trapped in a loop.
  *  PreToolUse (Bash)
  *    Asks for confirmation before commands that skip Git hooks
  *    (`git commit --no-verify`, `HUSKY=0 …`).
@@ -27,6 +29,7 @@
  */
 
 import type { Command } from 'commander';
+import childProcess from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -37,6 +40,7 @@ import { analyzeWithBase } from '../utils/integrity/engine.js';
 import { IntegrityGitError, baseFromCommit, headCommit, repoRootOf, resolveBase, snapshotWorkingTree, type ResolvedBase } from '../utils/integrity/git.js';
 import { blankQuotes, detectHookBypass, describeWeakener } from '../utils/integrity/commands.js';
 import { formatFindingsForAgent } from '../utils/integrity/report.js';
+import { verifyChange, type VerifyFinding, type VerifyReport } from '../utils/verify.js';
 import type { IntegrityFinding, IntegrityReport } from '../utils/integrity/types.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -67,8 +71,12 @@ export interface HookOptions {
   /** Compare with merge-base(HEAD, base) instead of the session's starting commit. */
   base?: string;
   bashGuard: BashGuardMode;
+  /** Use the rules bundled with this CLI instead of the project's own copy (Claude Code plugin). */
+  isolated?: boolean;
   /** Lint function (injectable for tests). */
   lint?: (file: string) => Promise<RunResult>;
+  /** Change verification (injectable for tests). */
+  verify?: typeof verifyChange;
 }
 
 interface SessionState {
@@ -83,6 +91,10 @@ interface SessionState {
   shownAdvisories: string[];
   /** Acceptance findings caused by the agent editing the baseline file itself. */
   agentAcceptances?: string[];
+  /** HEAD when the session started; `verify` compares lint findings against it. */
+  startCommit?: string | null;
+  /** Ids of `verify` findings already reported in this session. */
+  verifyReported?: string[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -259,7 +271,7 @@ function openSession(input: HookInput, cwd: string, opts: HookOptions, snapshot 
     try { baseTreeish = snapshotWorkingTree(repoRoot); baseLabel = 'the working tree at session start'; } catch { baseTreeish = null; }
   }
   if (baseTreeish === null) baseTreeish = headCommit(repoRoot);
-  const state: SessionState = { version: 1, baseTreeish, baseLabel, blockedSets: [], shownAdvisories: [] };
+  const state: SessionState = { version: 1, baseTreeish, baseLabel, blockedSets: [], shownAdvisories: [], startCommit: headCommit(repoRoot), verifyReported: [] };
   saveState(file, state);
   return { repoRoot, file, state };
 }
@@ -288,11 +300,16 @@ async function onPostToolUse(input: HookInput, cwd: string, opts: HookOptions): 
   const advisory: string[] = [];
 
   if (isScannableFile(target) && fs.existsSync(target)) {
+    // Isolated runs resolve ignore patterns against the target, so use the project root:
+    // from the file's own directory, dist/x.js would look like x.js and escape **/dist/**.
+    const relative = path.relative(cwd, target);
+    const inProject = relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
     const lint = opts.lint ?? ((file: string) => runEslint({
       preset: 'agent',
-      targetPath: path.dirname(file),
+      targetPath: opts.isolated && inProject ? cwd : path.dirname(file),
       files: [file],
       inlineSuppressions: 'require-reason',
+      isolated: opts.isolated,
     }));
     const result = await lint(target);
     if (result.totalIssues > 0) {
@@ -395,14 +412,92 @@ async function onStop(input: HookInput, cwd: string, opts: HookOptions): Promise
     return { systemMessage: `AI Guard: ${high.length} check-weakening finding(s) remain unresolved:\n${summarizeForUser(high)}` };
   }
 
+  // Lint findings the session introduced, and agent-config issues. Test weakening is covered above.
+  const step = await verifyStep(session, input, cwd, opts);
+  if (step.block) return { decision: 'block', reason: step.block };
+
+  const notes: string[] = [];
   const shown = new Set(session.state.shownAdvisories);
   const advisories = report.findings.filter((f) => !blocksAgent(f, state) && !shown.has(f.fingerprint));
   if (advisories.length > 0) {
     session.state.shownAdvisories.push(...advisories.map((f) => f.fingerprint));
     saveState(session.file, session.state);
-    return { systemMessage: `AI Guard advisory — review before merging:\n${summarizeForUser(advisories)}` };
+    notes.push(`AI Guard advisory — review before merging:\n${summarizeForUser(advisories)}`);
   }
-  return null;
+  if (step.user) notes.push(step.user);
+  return notes.length > 0 ? { systemMessage: notes.join('\n\n') } : null;
+}
+
+interface VerifyStep {
+  /** Reason to send back to Claude (blocks stopping). */
+  block?: string;
+  /** Text for the user (systemMessage). */
+  user?: string;
+}
+
+/** True when the file's content differs from the session's starting snapshot (or it has none). */
+function changedSinceBase(root: string, treeish: string | null, file: string): boolean {
+  if (!treeish) return true;
+  try {
+    const abs = path.resolve(root, file);
+    if (!fs.existsSync(abs)) return true;
+    const rel = path.relative(root, abs).replace(/\\/g, '/');
+    const run = (args: string[]): string => childProcess.execFileSync('git', args, { cwd: root, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000, windowsHide: true }).trim();
+    return run(['hash-object', '--', abs]) !== run(['rev-parse', '--verify', '--quiet', `${treeish}:${rel}`]);
+  } catch {
+    return true; // not in the snapshot, or Git could not tell: treat as changed
+  }
+}
+
+function describeVerifyItems(items: VerifyFinding[], max = 10): string {
+  const lines = items.slice(0, max).map((f) => {
+    const where = f.line > 0 ? `${f.file}:${f.line}` : f.file;
+    return `- ${where} [${f.check.replace(/^ai-guard\//, '')}] ${f.message}${f.remediation ? `\n  Fix: ${f.remediation}` : ''}`;
+  });
+  if (items.length > max) lines.push(`- …and ${items.length - max} more (run \`ai-guard verify\`).`);
+  return lines.join('\n');
+}
+
+async function verifyStep(session: Session, input: HookInput, cwd: string, opts: HookOptions): Promise<VerifyStep> {
+  let report: VerifyReport;
+  try {
+    report = await (opts.verify ?? verifyChange)({
+      cwd,
+      baseCommit: session.state.startCommit ?? undefined,
+      isolated: opts.isolated,
+      testIntegrity: false, // the integrity engine above already covers weakened tests
+    });
+  } catch (err) {
+    return { user: `AI Guard could not verify lint and agent-config changes: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (!report.success) {
+    if (report.errors.some((e) => e.code === 'GIT_FAILED')) return {};
+    return { user: `AI Guard could not verify lint and agent-config changes: ${report.errors.map((e) => e.message).join('; ')}` };
+  }
+
+  // Ignore files the session did not touch: work the user left uncommitted before it started is theirs.
+  const ours = (f: VerifyFinding): boolean => changedSinceBase(report.root || session.repoRoot, session.state.baseTreeish, f.file);
+  const blocking = report.blocking.filter(ours);
+  const reported = new Set(session.state.verifyReported ?? []);
+  const fresh = blocking.filter((f) => !reported.has(f.id));
+
+  // Without a session id nothing is remembered between stops, so a second stop in the
+  // same sequence must not block again (it would loop until the continuation cap).
+  const cannotTrack = session.file === null && input.stop_hook_active === true;
+  if (fresh.length > 0 && !cannotTrack) {
+    session.state.verifyReported = [...reported, ...fresh.map((f) => f.id)];
+    saveState(session.file, session.state);
+    return { block: `Before finishing: AI Guard found problems your changes introduced.\n${describeVerifyItems(fresh)}\nFix them. If one is intended, tell the user why instead of continuing to change code.` };
+  }
+  // Claude already had its chance in this stop sequence: tell the user once, and stay quiet on later turns.
+  if (blocking.length > 0 && input.stop_hook_active === true) return { user: `AI Guard: ${blocking.length} issue(s) from this session remain unresolved:\n${summarizeVerifyForUser(blocking)}` };
+  return {};
+}
+
+function summarizeVerifyForUser(items: VerifyFinding[], max = 5): string {
+  const lines = items.slice(0, max).map((f) => `• ${f.line > 0 ? `${f.file}:${f.line}` : f.file} — ${f.message}`);
+  if (items.length > max) lines.push(`• …and ${items.length - max} more (run \`ai-guard verify\`)`);
+  return lines.join('\n');
 }
 
 /** `ai-guard integrity --accept …` run by the agent: accepting a weakening is a human decision. */
@@ -457,7 +552,8 @@ export function registerClaudeHookCommand(program: Command): void {
     .option('--file <path>', 'Override: lint this file and print findings as text (for debugging)')
     .option('--base <ref>', 'Compare integrity with merge-base(HEAD, <ref>) instead of the session start')
     .option('--bash-guard <mode>', 'Commands that skip Git hooks: ask (default) | deny | off', 'ask')
-    .action(async (opts: { file?: string; base?: string; bashGuard: string }) => {
+    .option('--isolated', 'Use the rules bundled with this CLI, for projects without AI Guard installed (Claude Code plugin)')
+    .action(async (opts: { file?: string; base?: string; bashGuard: string; isolated?: boolean }) => {
       const cwd = process.cwd();
 
       if (opts.file) {
@@ -489,6 +585,7 @@ export function registerClaudeHookCommand(program: Command): void {
           stateDir: process.env.AI_GUARD_STATE_DIR || DEFAULT_STATE_DIR,
           base: opts.base,
           bashGuard,
+          isolated: opts.isolated,
         });
         if (output) process.stdout.write(JSON.stringify(output) + '\n');
       } catch (err) {

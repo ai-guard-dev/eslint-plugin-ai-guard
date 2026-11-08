@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import path from 'path';
 import fs from 'fs';
 import { log } from '../utils/logger.js';
+import { AGENT_RULES } from '../../src/configs/agent.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -274,15 +275,13 @@ export function registerInitClaudeCommand(program: Command): void {
       log.print(`  ${chalk.green('✔')}  ${chalk.bold('Settings:')} ${chalk.cyan(relPath)}`);
       log.blank();
       log.info('PostToolUse: after Claude edits a file, findings and weakened checks are sent back to Claude.');
-      if (opts.stopHook !== false) log.info('Stop: before Claude finishes, newly weakened checks (skips, suppressions, config downgrades) block once.');
+      if (opts.stopHook !== false) log.info('Stop: before Claude finishes, newly weakened checks (skips, suppressions, config downgrades) and problems the session introduced (placeholder code, agent-config issues) block once.');
       if (opts.bashGuard !== false) log.info('PreToolUse: commands that skip Git hooks (--no-verify, HUSKY=0) ask for confirmation.');
       log.blank();
-      log.print(`  ${chalk.gray('Rules enabled (agent preset):')}`);
-      log.print(`    ${chalk.yellow('•')} no-hardcoded-secret  ${chalk.gray('(high confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-eval-dynamic      ${chalk.gray('(high confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-empty-catch       ${chalk.gray('(high confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-sql-string-concat ${chalk.gray('(medium confidence)')}`);
-      log.print(`    ${chalk.yellow('•')} no-floating-promise  ${chalk.gray('(high confidence)')}`);
+      log.print(`  ${chalk.gray('Rules on every edit (agent preset):')}`);
+      for (const rule of Object.keys(AGENT_RULES)) {
+        log.print(`    ${chalk.yellow('•')} ${rule.replace('ai-guard/', '')}`);
+      }
       log.blank();
       log.info(`To remove: delete the AI Guard hook entry from ${chalk.cyan(relPath)}`);
       log.blank();

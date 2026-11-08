@@ -13,7 +13,7 @@ import { createTempRepo, type TempRepo } from '../helpers/git-repo';
 import { handleHookInput, parseHookInput, type HookOptions } from '../../cli/commands/claude-hook';
 import type { RunResult } from '../../cli/utils/eslint-runner';
 
-const TESTS = `describe('cart', () => {\n  it('adds', () => { expect(1).toBe(1); });\n  it('totals', () => { expect(2).toBe(2); });\n});\n`;
+const TESTS = `describe('cart', () => {\n  it('adds', () => { expect(cart(1)).toBe(1); });\n  it('totals', () => { expect(cart(2)).toBe(2); });\n});\n`;
 
 let repo: TempRepo;
 let stateDir: string;
@@ -123,7 +123,7 @@ describe('Stop', () => {
   });
 
   it('advisory-only findings never block; they are shown to the user once', async () => {
-    repo.write('src/cart.test.ts', TESTS.replace('expect(1).toBe(1)', 'expect(1).toBeTruthy()').replace('expect(2).toBe(2)', 'expect(2).toBeDefined()'));
+    repo.write('src/cart.test.ts', TESTS.replace('expect(cart(1)).toBe(1)', 'expect(cart(1)).toBeTruthy()').replace('expect(cart(2)).toBe(2)', 'expect(cart(2)).toBeDefined()'));
     expect(await handleHookInput(stop(), opts())).toEqual({ systemMessage: expect.stringContaining('advisory') });
     expect(await handleHookInput(stop(), opts())).toBeNull();
   });

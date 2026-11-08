@@ -2,7 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.4.3] — unreleased
+## [1.4.4] — unreleased
+
+### Added — agent safety
+- `ai-guard scan-agent-config`: scans agent instructions and MCP/agent config (CLAUDE.md, AGENTS.md, .cursorrules, skills, `.mcp.json`, Claude settings) for hidden Unicode text (decoded), instructions hidden in HTML comments, pipe-to-shell installs, concealment phrases, credential reads, exfiltration, unpinned MCP servers, inline secrets, plain-HTTP remotes, and risky Claude settings. Per-server fingerprints with an optional lock file. SARIF uses its own `ai-guard-agent-config` slot.
+- `ai-guard verify`: one verdict for a change. Lint findings count only when the change introduced them (including ones created by deleting lines); test weakening and agent-config issues are included. Exit 0 pass, 1 blocking, 2 not fully verified.
+- `ai-guard changed --test-integrity` and GitHub Action input `test-integrity`: a test-focused comparison (focused, deleted, removed, skipped or weakened tests, rewritten snapshots, test scripts and configs that can no longer fail). It overlaps with `ai-guard integrity` from 1.4.3, which is broader (suppressions, coverage thresholds, CI steps, TypeScript strictness); use `integrity` for the full set. The two are independent and may be combined in a later release.
+- The Claude Code **Stop** hook also verifies the lint findings and agent-config issues the session introduced, next to 1.4.3's check-integrity analysis. They block once per finding, files the session did not touch are ignored, and what stays unresolved is shown to the user. `claude-hook --isolated` runs the bundled rules for the Claude Code plugin; the plugin ships its own hook definitions.
+- MCP tools `ai_guard_verify_change`, `ai_guard_scan_agent_config`, `ai_guard_fix` (a diff by default; writes only with `apply: true`). `ai_guard_scan_diff` also returns `testIntegrity`. The server now has 8 tools.
+- Rules (27 total): `no-tautological-assertion`, `no-assertionless-test`, `no-test-env-branch`, at `warn` in recommended.
+
+### Added — six rules (27 total with the three test rules below)
+- `no-client-exposed-secret` (Security, `error` in recommended): secret env vars behind public bundler prefixes (`NEXT_PUBLIC_`, `VITE_`, `EXPO_PUBLIC_`, `REACT_APP_`, …), server secrets read in `"use client"` files, and LLM SDK clients created with `dangerouslyAllowBrowser` and an app-owned key. Publishable, anon, site and public map keys are not flagged. Option: `allow`.
+- `no-invisible-unicode` (Security, `error` in recommended): Trojan Source bidi controls, zero-width and Hangul-filler characters, Unicode tag characters and variation-selector runs. Hidden tag text is decoded into the message. Safe autofix: removal in comments, escape sequences in strings, templates and regexes. Emoji ZWJ sequences, Persian/Indic joiners and flag tag sequences are allowed.
+- `no-placeholder-implementation` (AI Patterns, `warn`): elision comments that replace deleted code (`// ... rest of the code`), TODO-only stub bodies, whole-body `throw new Error('Not implemented')`, and mock data returned from production code. Abstract/base classes (including `@abstract` JSDoc), type declarations, tests, mocks, stories and seeds are excluded.
+- `no-silent-fallback` (Reliability, `warn`): hardcoded fallbacks for secret env vars (`process.env.JWT_SECRET || 'secret'`) and `catch { return [] }` around awaited calls. Durations, `?? ''`, NODE_ENV-guarded dev values, safe-parse helpers and documented catches are excluded.
+- `no-unsanitized-html` (Security, `warn`): dynamic values in `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write` and `dangerouslySetInnerHTML`. Follows local constants, `+=` builders, `.map().join('')` and local helpers; allows sanitizers, escaping renderers, translations and numeric values. Specific messages for URL/request/storage/LLM input, markdown renderers, and `JSON.stringify` in script tags.
+- `no-undeclared-import` (Security, `warn`): imports of packages missing from every package.json up to the repository root, distinguishing likely-hallucinated packages (not installed) from phantom dependencies (installed transitively). Understands built-ins, `@types/*`, tsconfig `paths`/`baseUrl` (including `extends`), common aliases and guarded optional `require`/`import()`. Offline; re-reads package.json when it changes. Option: `allow`.
+
+### Changed
+- `agent` preset: 5 → 8 rules. Adds `no-client-exposed-secret`, `no-invisible-unicode` and `no-undeclared-import` at `error`.
+- `security` preset: 6 → 11 rules.
+- The CLI's preset maps and the `ai-guard preset` summary are now derived from `src/configs/*` instead of hand-copied lists, so CLI, MCP and ESLint users always run the same rules.
+- `ai-guard init-context` writes guidance for the new rules into CLAUDE.md, AGENTS.md, `.cursorrules` and Copilot instructions, and states the rule count from the registry.
+
+### Tests
+- A registry test now fails if a rule is missing CLI/SARIF metadata, a docs page, or its strict-preset entry. It documents one pre-existing mismatch: `no-empty-catch` is `high` confidence for `--fail-on` but `medium` in JSON/SARIF output.
+
+
+### Fixed
+- `no-async-without-await` no longer reports expression-bodied arrows whose `await` is nested, such as `async () => (await load()).items`.
+- MCP findings report `fixable` accurately.
+
+---
+
+## [1.4.3] — 2026-10-24
 
 ### Added — baseline
 - `ai-guard baseline create` and `ai-guard baseline check` subcommands (`save`, `--save` and `--check` keep working; `save` is an alias of `create`).

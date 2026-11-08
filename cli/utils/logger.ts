@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { virtualRules } from './check-catalog.js';
 import type { EcosystemIssue, ParserError } from '../utils/eslint-runner.js';
 
 // ── Category icon + color map ──────────────────────────────────────────────────
@@ -35,6 +36,15 @@ export const RULE_CATEGORY: Record<string, string> = {
   'ai-guard/no-console-in-handler': 'AI Patterns',
   'ai-guard/no-duplicate-logic-block': 'AI Patterns',
   'ai-guard/no-dead-branch': 'AI Patterns',
+  'ai-guard/no-client-exposed-secret': 'Security',
+  'ai-guard/no-invisible-unicode': 'Security',
+  'ai-guard/no-undeclared-import': 'Security',
+  'ai-guard/no-unsanitized-html': 'Security',
+  'ai-guard/no-silent-fallback': 'Reliability',
+  'ai-guard/no-placeholder-implementation': 'AI Patterns',
+  'ai-guard/no-tautological-assertion': 'AI Patterns',
+  'ai-guard/no-assertionless-test': 'AI Patterns',
+  'ai-guard/no-test-env-branch': 'AI Patterns',
 };
 
 // ── Confidence tiers ─────────────────────────────────────────────────
@@ -68,7 +78,22 @@ export const CONFIDENCE_TIER: Record<string, ConfidenceTier> = {
   // Informational — mostly stylistic, high framework FP rate, collapsed by default
   'ai-guard/no-async-without-await': 'informational',
   'ai-guard/no-redundant-await': 'informational',
+  'ai-guard/no-client-exposed-secret': 'high',
+  'ai-guard/no-invisible-unicode': 'high',
+  'ai-guard/no-undeclared-import': 'high',
+  'ai-guard/no-unsanitized-html': 'medium',
+  'ai-guard/no-silent-fallback': 'medium',
+  'ai-guard/no-placeholder-implementation': 'medium',
+  'ai-guard/no-tautological-assertion': 'high',
+  'ai-guard/no-assertionless-test': 'medium',
+  'ai-guard/no-test-env-branch': 'medium',
 };
+
+// Virtual rules: agent-config and test-integrity checks (see check-catalog.ts).
+for (const [id, meta] of Object.entries(virtualRules())) {
+  RULE_CATEGORY[id] ??= meta.category;
+  CONFIDENCE_TIER[id] ??= meta.confidence;
+}
 
 /** Returns true if the tier should be collapsed in default (non-verbose) output */
 export function isCollapsedByDefault(tier: ConfidenceTier): boolean {

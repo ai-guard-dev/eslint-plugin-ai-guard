@@ -24,6 +24,11 @@ inputs:
     default: 'true'
     required: false
 
+  test-integrity:
+    description: 'With changed-only, also flag tests the PR deleted, skipped, focused or weakened (needs fetch-depth: 0). Requires eslint-plugin-ai-guard >= 1.4.4. See also the broader integrity input.'
+    default: 'false'
+    required: false
+
   path:
     description: 'Directory or file to scan'
     default: '.'

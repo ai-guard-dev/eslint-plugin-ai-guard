@@ -1,6 +1,6 @@
 # Rules
 
-`eslint-plugin-ai-guard` currently ships 18 rules across four categories:
+`eslint-plugin-ai-guard` currently ships 27 rules across four categories:
 
 - Error handling
 - Async correctness

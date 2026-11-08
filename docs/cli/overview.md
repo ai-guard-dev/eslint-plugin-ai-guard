@@ -32,6 +32,9 @@ ai-guard run
 | [`baseline`](baseline.md) | Save + diff issues over time | For gradual adoption |
 | `changed` | Scan only changed files (`--integrity` adds check integrity) | Pull requests and CI |
 | [`integrity`](../integrity.md) | Detect changes that weaken checks vs a base revision | Before merging agent-written changes |
+| [`verify`](verify.md) | One verdict for the current change | Before calling work done or merging |
+| [`scan-agent-config`](scan-agent-config.md) | Check agent instructions and MCP config | When adding or reviewing agent config |
+| `changed --test-integrity` ([details](test-integrity.md)) | Flag weakened tests in a change | In pull requests |
 
 ---
 
@@ -56,7 +59,7 @@ npx ai-guard run --path src/api
 # Scan a single file
 npx ai-guard run --path src/api/users.ts
 
-# Strict mode (all 18 rules at error)
+# Strict mode (all 27 rules at error)
 npx ai-guard run --strict
 
 # Security scan only

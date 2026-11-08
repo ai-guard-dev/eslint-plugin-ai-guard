@@ -6,6 +6,9 @@
  */
 
 import type { IssueDetail } from '../../cli/utils/eslint-runner.js';
+import type { TestIntegrityFinding } from '../../cli/utils/test-integrity.js';
+import type { VerifyFinding } from '../../cli/utils/verify.js';
+import type { AgentConfigFinding, McpServerInfo } from '../../cli/utils/agent-config.js';
 
 // ─── MCP Issue (subset of IssueDetail for MCP transport) ──────────────────────
 
@@ -54,6 +57,63 @@ export interface ScanDiffResult extends ScanResult {
   changedFiles: number;
   scanMode: string;
   base?: string;
+  /** Tests the change weakened; absent when testIntegrity is false or the scan failed. */
+  testIntegrity?: {
+    findings: TestIntegrityFinding[];
+    testFilesAnalyzed: number;
+    errors: Array<{ file: string; message: string }>;
+  };
+}
+
+type ToolError = { code: string; message: string; file?: string; line?: number };
+
+export interface VerifyChangeResult {
+  success: boolean;
+  /** True when the whole change was analyzed and has no blocking findings. */
+  pass: boolean;
+  status: 'complete' | 'partial' | 'failed';
+  /** What to fix and what to tell the user, ready to act on. */
+  summary: string;
+  base: string;
+  changedFiles: number;
+  blocking: VerifyFinding[];
+  disclosures: VerifyFinding[];
+  totalBlocking: number;
+  totalDisclosures: number;
+  /** Findings in touched files that this change did not introduce. */
+  preExisting: number;
+  truncated: boolean;
+  errors: ToolError[];
+}
+
+export interface ScanAgentConfigResult {
+  success: boolean;
+  status: 'complete' | 'failed';
+  clean: boolean;
+  filesScanned: number;
+  errorCount: number;
+  warningCount: number;
+  findings: AgentConfigFinding[];
+  totalFindings: number;
+  truncated: boolean;
+  servers: McpServerInfo[];
+  errors: ToolError[];
+}
+
+export interface FixResult {
+  success: boolean;
+  status: 'complete' | 'failed';
+  file: string;
+  changed: boolean;
+  /** True only when apply was requested and the file was written. */
+  applied: boolean;
+  fixedRules: string[];
+  fixedCount: number;
+  /** Unified diff of the fixes. */
+  diff: string;
+  /** Findings that remain after fixing. */
+  remaining: McpIssue[];
+  errors: ToolError[];
 }
 
 export interface RuleInfo {
@@ -96,7 +156,7 @@ export function toMcpIssue(issue: IssueDetail, filePath: string): McpIssue {
     message: issue.message,
     category: issue.category,
     remediation: issue.remediation,
-    fixable: false, // MCP does not offer automatic source modification.
+    fixable: issue.fixable ?? false,
     ...(issue.suppression ? {
       inlineDirective: {
         kind: issue.suppression.kind,

@@ -13,6 +13,8 @@ import { registerReportCommand } from './commands/report.js';
 import { registerInitClaudeCommand } from './commands/init-claude.js';
 import { registerClaudeHookCommand } from './commands/claude-hook.js';
 import { registerIntegrityCommand } from './commands/integrity.js';
+import { registerScanAgentConfigCommand } from './commands/scan-agent-config.js';
+import { registerVerifyCommand } from './commands/verify.js';
 import { log } from './utils/logger.js';
 
 // ─── Version resolution ───────────────────────────────────────────────────────
@@ -44,7 +46,8 @@ program
     '  npx ai-guard integrity    Detect weakened checks (skips, suppressions, configs)\n' +
     '  npx ai-guard init         Auto-configure ESLint\n' +
     '  npx ai-guard init-context Generate AI agent rules\n' +
-    '  npx ai-guard init-claude  Configure Claude Code hook\n' +
+    '  npx ai-guard init-claude  Configure Claude Code hooks\n' +
+    '  npx ai-guard scan-agent-config  Check CLAUDE.md, AGENTS.md and MCP config\n' +
     '  npx ai-guard report       Generate shareable HTML report\n' +
     '  npx ai-guard doctor       Check your setup\n' +
     '  npx ai-guard baseline     Save baseline, track new issues only',
@@ -66,6 +69,8 @@ registerInitContextCommand(program);
 registerReportCommand(program);
 registerInitClaudeCommand(program);
 registerClaudeHookCommand(program);
+registerScanAgentConfigCommand(program);
+registerVerifyCommand(program);
 
 // ─── Global error handling ────────────────────────────────────────────────────
 
