@@ -378,6 +378,11 @@ This dual-layer defense minimizes review friction and ensures generated code mee
 
 ## Claude Code Integration
 
+Two ways to use it. Pick one:
+
+- **In a project (recommended):** `npm install --save-dev eslint-plugin-ai-guard`, then `npx ai-guard init-claude`. This writes the hooks into the project's `.claude/settings.json`, so everyone on the project gets them.
+- **As a Claude Code plugin** (adds the MCP tools and the `/ai-guard:verify-changes` skill, and works in projects without AI Guard installed): `claude plugin marketplace add ai-guard-dev/eslint-plugin-ai-guard`, then `claude plugin install ai-guard@ai-guard-plugins`.
+
 AI Guard integrates directly with [Claude Code](https://code.claude.com/docs/en/hooks) through hooks:
 
 ```bash

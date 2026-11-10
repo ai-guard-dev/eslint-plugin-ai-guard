@@ -1,0 +1,15 @@
+{
+  "name": "ai-guard-plugins",
+  "description": "AI Guard: deterministic guardrails for AI-generated JavaScript and TypeScript, for Claude Code.",
+  "owner": {
+    "name": "AI Guard",
+    "url": "https://github.com/ai-guard-dev"
+  },
+  "plugins": [
+    {
+      "name": "ai-guard",
+      "source": "./plugins/ai-guard",
+      "description": "Scans AI-edited JS/TS, returns findings to Claude after each edit, and verifies the whole change (including weakened tests and agent config) when Claude finishes. Runs locally."
+    }
+  ]
+}

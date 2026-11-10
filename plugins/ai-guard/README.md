@@ -35,7 +35,16 @@ You don't need ESLint or AI Guard installed in your project. Your project's ESLi
 
 ## Install
 
-Install it from a marketplace that lists this plugin. Claude Code then installs the pinned dependencies (about 110 packages, ~45 MB, from `package-lock.json`, with install scripts disabled) when the plugin is installed, so the server starts in about two seconds.
+This repository is its own Claude Code marketplace, so there is nothing else to register. In a terminal:
+
+```bash
+claude plugin marketplace add ai-guard-dev/eslint-plugin-ai-guard
+claude plugin install ai-guard@ai-guard-plugins
+```
+
+Inside a Claude Code session the same steps are `/plugin marketplace add ai-guard-dev/eslint-plugin-ai-guard` and `/plugin install ai-guard@ai-guard-plugins`. The plugin is not listed in Anthropic's plugin directory, which only accepts hooks, local MCP servers and dependency installs from Verified organizations.
+
+On install, Claude Code then installs the pinned dependencies (about 110 packages, ~45 MB, from `package-lock.json`, with install scripts disabled) when the plugin is installed, so the server starts in about two seconds.
 
 To try it from a clone without a marketplace, install the dependencies yourself first, because `--plugin-dir` does not install them:
 
