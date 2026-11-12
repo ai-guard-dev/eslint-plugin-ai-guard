@@ -91,6 +91,51 @@ export function parseDependencySpec(name: string, value: unknown): PackageReques
   return { name, spec: normalizeSpec(spec), raw };
 }
 
+type Triple = [number, number, number];
+
+function compare(a: Triple, b: Triple): number {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+/**
+ * Whether `version` satisfies `range`, for the range forms package.json and
+ * install commands use: exact, `=x`, `^x.y.z`, `~x.y.z`, `>=x.y.z`, `*`, and
+ * partial versions such as `1`, `1.2`, `1.x`, `^1.2`. Returns null for anything
+ * else (`||`, hyphen ranges, `<`, prerelease ranges), so callers can skip
+ * rather than guess. Prerelease versions only satisfy an exact match.
+ */
+export function rangeIncludes(range: string | null, version: string): boolean | null {
+  const v = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?$/i.exec(version.trim());
+  if (!v) return null;
+  const target: Triple = [Number(v[1]), Number(v[2]), Number(v[3])];
+  const spec = (range ?? '').trim();
+  if (spec === '' || spec === '*' || spec === 'x' || spec === 'latest') return !v[4];
+  if (isExactVersion(spec) || /^=v?\d/.test(spec)) return spec.replace(/^=?v?/i, '') === version.trim().replace(/^v/i, '');
+  const m = /^(\^|~|>=)?\s*v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/i.exec(spec);
+  if (!m) return null;
+  if (v[4]) return false;
+  const op = m[1] ?? '';
+  const parts = [m[2], m[3], m[4]].map((p) => (p === undefined || /^[x*]$/i.test(p) ? null : Number(p)));
+  // A wildcard ends the version: 1.x.3 is not a range npm accepts.
+  if (parts[1] === null && parts[2] !== null) return null;
+  const given = parts.filter((p) => p !== null).length;
+  const low: Triple = [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  if (compare(target, low) < 0) return false;
+  if (op === '>=') return true;
+  let high: Triple;
+  if (op === '^') {
+    if (low[0] > 0 || given === 1) high = [low[0] + 1, 0, 0];
+    else if (low[1] > 0 || given === 2) high = [0, low[1] + 1, 0];
+    else high = [0, 0, low[2] + 1];
+  } else if (op === '~' || given >= 2) {
+    high = given === 1 ? [low[0] + 1, 0, 0] : [low[0], low[1] + 1, 0];
+    if (op === '' && given === 3) return compare(target, low) === 0;
+  } else {
+    high = [low[0] + 1, 0, 0];
+  }
+  return compare(target, high) < 0;
+}
+
 /** `npm init <x>` / `npm create <x>` / `yarn create <x>` run the package `create-<x>`. */
 export function initializerPackage(arg: string): PackageRequest | null {
   const raw = arg.trim();

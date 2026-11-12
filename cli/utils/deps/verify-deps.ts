@@ -11,6 +11,8 @@ import { assessPackages, type PackageAssessment, type DepFinding, type PackageFa
 import { addedDependencies, allDependencies, listManifests, localPackageNames, type DependencyEntry } from './dependencies.js';
 import { parsePackageArg, type PackageRequest } from './package-spec.js';
 import { readRegistryConfig } from './registry-config.js';
+import { cooldownTip, detectPackageManager, readReleaseCooldown, type ReleaseCooldown } from './cooldown.js';
+import type { PackageManager } from './install-command.js';
 import { RegistryClient } from './registry.js';
 import type { RunResult, FileResult } from '../eslint-runner.js';
 
@@ -41,6 +43,12 @@ export interface DepsReport {
   skipped: number;
   unchecked: number;
   errors: Array<{ code: string; message: string; file?: string }>;
+  /** The project's package manager, from package.json or its lockfile; null when unknown. */
+  packageManager: PackageManager | null;
+  /** Release cooldown that package manager enforces, if any. */
+  cooldown: ReleaseCooldown | null;
+  /** How to turn a cooldown on, when none is in effect. */
+  cooldownTip: string | null;
   durationMs: number;
 }
 
@@ -53,6 +61,8 @@ export interface VerifyDepsOptions {
   packages?: string[];
   minAgeDays?: number;
   minWeeklyDownloads?: number;
+  /** Fresh-release window in hours (default 24; 0 turns the check off). */
+  freshHours?: number;
   client?: RegistryClient;
   confirmRegistry?: (cwd: string, name: string) => boolean;
   now?: () => number;
@@ -67,7 +77,7 @@ function gitRoot(cwd: string): string {
 }
 
 function emptyReport(root: string, mode: DepsReport['mode'], start: number): DepsReport {
-  return { success: true, root, mode, base: null, packages: [], checked: 0, blocked: 0, warnings: 0, skipped: 0, unchecked: 0, errors: [], durationMs: Date.now() - start };
+  return { success: true, root, mode, base: null, packages: [], checked: 0, blocked: 0, warnings: 0, skipped: 0, unchecked: 0, errors: [], packageManager: null, cooldown: null, cooldownTip: null, durationMs: Date.now() - start };
 }
 
 function toItem(a: PackageAssessment, entry: DependencyEntry | null): DepsReportItem {
@@ -123,6 +133,10 @@ export async function verifyDeps(options: VerifyDepsOptions): Promise<DepsReport
     }
   }
 
+  report.packageManager = detectPackageManager(root);
+  report.cooldown = report.packageManager ? readReleaseCooldown(root, report.packageManager) : null;
+  report.cooldownTip = report.cooldown && report.cooldown.minutes > 0 ? null : cooldownTip(report.packageManager);
+
   const assessments = await assessPackages(requests.map((r) => r.request), {
     client: options.client ?? new RegistryClient(),
     registryConfig: readRegistryConfig(root),
@@ -131,6 +145,8 @@ export async function verifyDeps(options: VerifyDepsOptions): Promise<DepsReport
     minWeeklyDownloads: options.minWeeklyDownloads,
     confirmRegistry: options.confirmRegistry,
     now: options.now,
+    freshHours: options.freshHours,
+    cooldown: report.cooldown,
   });
   report.packages = assessments.map((a, i) => toItem(a, requests[i].entry));
   for (const item of report.packages) {

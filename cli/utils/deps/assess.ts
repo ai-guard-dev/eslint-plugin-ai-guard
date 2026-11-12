@@ -12,16 +12,23 @@
  *   typosquat-suspect       look-alike name + new or rarely downloaded
  *   install-script-unknown  install script + new or rarely downloaded
  *
+ * fresh-release is a warning with its own handling in the install hook (the
+ * user is asked): the version being installed was published in the last day
+ * (DEFAULT_FRESH_HOURS). Hijacked releases of popular packages are published
+ * like any other release and are usually removed within hours. Skipped when
+ * the project's package manager already enforces a release cooldown that long.
+ *
  * Packages in the bundled popular list skip the age and download lookups:
  * they are established by definition, and their documents can be huge.
  */
 
 import type { PackageRequest } from './package-spec.js';
-import { isDistTag, isExactVersion } from './package-spec.js';
+import { isDistTag, isExactVersion, rangeIncludes } from './package-spec.js';
 import { RegistryError, type RegistryClient, type VersionFacts } from './registry.js';
 import { confirmPublicRegistry, usesPublicRegistry, type RegistryConfig } from './registry-config.js';
 import { findLookalike, popularIndex, type PopularIndex } from './lookalike.js';
 import { DEPENDENCY_CHECKS, type DependencyCheck } from '../check-catalog.js';
+import { cooldownCovers, type ReleaseCooldown } from './cooldown.js';
 
 export type DepCheck = DependencyCheck;
 
@@ -32,6 +39,9 @@ export const BLOCKING_DEP_CHECKS: ReadonlySet<DepCheck> = new Set(
 
 /** Blocking checks that are facts: installing would fail or install a placeholder. */
 export const FACT_DEP_CHECKS: ReadonlySet<DepCheck> = new Set(['package-not-found', 'version-not-found', 'security-holding']);
+
+/** Warnings the install hook asks the user about instead of only passing them on. */
+export const ASK_DEP_CHECKS: ReadonlySet<DepCheck> = new Set(['fresh-release']);
 
 export interface DepFinding {
   check: DepCheck;
@@ -47,6 +57,8 @@ export interface PackageFacts {
   weeklyDownloads: number | null;
   installScripts: string[];
   deprecated: string | null;
+  /** When the checked version was published, when it was looked up. */
+  publishedAt?: string | null;
 }
 
 export type Verdict = 'ok' | 'warning' | 'block' | 'skipped' | 'unchecked';
@@ -75,10 +87,16 @@ export interface AssessContext {
   confirmRegistry?: (cwd: string, name: string) => boolean;
   /** Parallel registry requests. */
   concurrency?: number;
+  /** Versions published fewer hours ago are fresh releases; 0 turns the check off. */
+  freshHours?: number;
+  /** Release cooldown the package manager enforces (skips the fresh-release check when it covers the window). */
+  cooldown?: ReleaseCooldown | null;
 }
 
 export const DEFAULT_MIN_AGE_DAYS = 30;
 export const DEFAULT_MIN_WEEKLY_DOWNLOADS = 100;
+/** One day, the window pnpm 11 enforces by default. */
+export const DEFAULT_FRESH_HOURS = 24;
 /** Above this, a look-alike name belongs to an established package of its own. */
 const ESTABLISHED_DOWNLOADS = 10_000;
 
@@ -116,6 +134,40 @@ function strictVersion(req: PackageRequest): boolean {
   return isExactVersion(req.spec) || isDistTag(req.spec);
 }
 
+export function describeHours(hours: number): string {
+  if (hours < 1) return 'less than an hour ago';
+  const n = Math.round(hours);
+  return `${n} hour${n === 1 ? '' : 's'} ago`;
+}
+
+/** Whether the version that was looked up is the one this request installs. */
+function installsVersion(req: PackageRequest, version: string): boolean {
+  if (req.spec === null || isExactVersion(req.spec) || isDistTag(req.spec)) return true;
+  return rangeIncludes(req.spec, version) === true;
+}
+
+/** Ages in minutes to flag, or null when the check does not apply to this package. */
+function freshWindow(name: string, ctx: AssessContext): { from: number; to: number } | null {
+  const hours = ctx.freshHours ?? DEFAULT_FRESH_HOURS;
+  if (!(hours > 0)) return null;
+  const to = hours * 60;
+  if (cooldownCovers(ctx.cooldown, name, to)) return null;
+  // A shorter cooldown already refuses the youngest releases.
+  const from = ctx.cooldown && cooldownCovers(ctx.cooldown, name, ctx.cooldown.minutes) ? ctx.cooldown.minutes : 0;
+  return { from, to };
+}
+
+function freshFinding(name: string, version: string, publishedAt: string, ctx: AssessContext, previous: string | null): DepFinding | null {
+  const window = freshWindow(name, ctx);
+  const when = Date.parse(publishedAt);
+  if (!window || Number.isNaN(when)) return null;
+  const minutes = Math.max(0, ((ctx.now ?? Date.now)() - when) / 60_000);
+  if (minutes < window.from || minutes >= window.to) return null;
+  const prev = previous ? ` The release before it is ${name}@${previous}.` : '';
+  return finding('fresh-release',
+    `${name}@${version} was published ${describeHours(minutes / 60)}. Hijacked releases of real packages are published like any other and are usually removed within hours; a release that has been public for a day is the safer choice.${prev}`);
+}
+
 function didYouMean(similar: string | null): string {
   return similar ? ` Did you mean "${similar}"?` : '';
 }
@@ -131,6 +183,17 @@ async function assessPopular(req: PackageRequest, ctx: AssessContext): Promise<P
     facts.installScripts = lookup.facts.installScripts;
     facts.deprecated = lookup.facts.deprecated;
     if (lookup.facts.deprecated) findings.push(finding('deprecated', `${req.name}@${lookup.facts.version} is deprecated: "${lookup.facts.deprecated}"`));
+    // Popular documents can be huge, so the publish time comes from the tarball's headers.
+    const { tarball } = lookup.facts;
+    if (tarball && freshWindow(req.name, ctx) && installsVersion(req, lookup.facts.version)) {
+      try {
+        facts.publishedAt = await ctx.client.getPublishTime(req.name, lookup.facts.version, tarball);
+      } catch (error) {
+        if (!(error instanceof RegistryError)) throw error;
+      }
+      const fresh = facts.publishedAt ? freshFinding(req.name, lookup.facts.version, facts.publishedAt, ctx, null) : null;
+      if (fresh) findings.push(fresh);
+    }
   }
   return { request: req, verdict: verdictOf(findings), findings, facts };
 }
@@ -143,6 +206,18 @@ function resolveVersion(req: PackageRequest, distTags: Record<string, string>, v
   }
   const latest = distTags.latest;
   return latest ? versions[latest] ?? null : null;
+}
+
+/** Newest stable version published before the fresh window, as a safer choice to suggest. */
+function previousRelease(publishedAt: Record<string, string>, current: string, now: number, ctx: AssessContext): string | null {
+  const cutoff = now - (ctx.freshHours ?? DEFAULT_FRESH_HOURS) * 3_600_000;
+  let best: { version: string; when: number } | null = null;
+  for (const [version, iso] of Object.entries(publishedAt)) {
+    const when = Date.parse(iso);
+    if (version === current || version.includes('-') || Number.isNaN(when) || when >= cutoff) continue;
+    if (!best || when > best.when) best = { version, when };
+  }
+  return best?.version ?? null;
 }
 
 async function assessUnknown(req: PackageRequest, ctx: AssessContext, popular: PopularIndex): Promise<PackageAssessment> {
@@ -225,6 +300,14 @@ async function assessUnknown(req: PackageRequest, ctx: AssessContext, popular: P
   }
   if (facts.deprecated) {
     findings.push(finding('deprecated', `${req.name}@${facts.version} is deprecated: "${facts.deprecated}"`));
+  }
+  if (version) {
+    facts.publishedAt = doc.publishedAt[version.version] ?? null;
+    // A package that is itself new is already reported as new; its first releases are all fresh.
+    if (facts.publishedAt && !young && installsVersion(req, version.version)) {
+      const fresh = freshFinding(req.name, version.version, facts.publishedAt, ctx, previousRelease(doc.publishedAt, version.version, now, ctx));
+      if (fresh) findings.push(fresh);
+    }
   }
 
   return { request: req, verdict: verdictOf(findings), findings, facts, ...(similar ? { similarTo: similar } : {}) };

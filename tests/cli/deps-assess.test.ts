@@ -31,12 +31,12 @@ const req = (arg: string) => parsePackageArg(arg)!;
 const checks = (a: { findings: Array<{ check: string }> }): string[] => a.findings.map((f) => f.check);
 
 describe('popular packages', () => {
-  it('are checked with one small request and no age or download lookups', async () => {
+  it('are checked with one small request and a HEAD for the publish time, no age or download lookups', async () => {
     const ctx = await setup({ react: established() });
     const a = await assessPackage(req('react'), ctx);
     expect(a.verdict).toBe('ok');
     expect(a.facts?.popular).toBe(true);
-    expect(registry!.requests).toEqual(['/react/latest']);
+    expect(registry!.requests).toEqual(['/react/latest', 'HEAD /react/-/react-1.0.0.tgz']);
   });
 
   it('report a deprecated version', async () => {
@@ -193,7 +193,7 @@ describe('batching and caching', () => {
     const ctx = await setup({ react: established() });
     const results = await assessPackages([req('react'), req('react'), req('react')], ctx);
     expect(results).toHaveLength(3);
-    expect(registry!.requests).toEqual(['/react/latest']);
+    expect(registry!.requests).toEqual(['/react/latest', 'HEAD /react/-/react-1.0.0.tgz']);
   });
 
   it('caches on disk, and forgets "not found" after ten minutes', async () => {

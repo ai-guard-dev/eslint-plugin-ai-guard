@@ -53,6 +53,45 @@ describe('verify-deps: added dependencies', () => {
     expect(depsExitCode(report, 'none')).toBe(0);
   });
 
+  it('warns about a dependency whose newest matching release is a few hours old, unless a cooldown covers it', async () => {
+    const fresh: FakePackage = {
+      created: daysAgo(3000), latest: '5.2.0', downloads: 3_000_000,
+      versions: { '5.1.0': { published: daysAgo(30) }, '5.2.0': { published: new Date(NOW - 4 * 3_600_000).toISOString() } },
+    };
+    registry = await startFakeRegistry({ ...PACKAGES, axios: fresh });
+    repo = createTempRepo({ 'package.json': manifest({}), 'package-lock.json': '{}\n' });
+    repo.commit('initial');
+    repo.write('package.json', manifest({ axios: '^5.2.0', react: '^18.3.1' }));
+    // The user's own ~/.npmrc must not decide this test.
+    const userconfig = process.env.npm_config_userconfig;
+    process.env.npm_config_userconfig = `${repo.dir}/no-such-npmrc`;
+    try {
+      await checkFresh();
+    } finally {
+      if (userconfig === undefined) delete process.env.npm_config_userconfig;
+      else process.env.npm_config_userconfig = userconfig;
+    }
+  });
+
+  async function checkFresh(): Promise<void> {
+    const report = await run();
+    expect(report.packageManager).toBe('npm');
+    expect(report.cooldown).toBeNull();
+    expect(report.cooldownTip).toContain('min-release-age=1');
+    const axios = report.packages.find((p) => p.name === 'axios')!;
+    expect(axios.findings.map((f) => f.check)).toEqual(['fresh-release']);
+    expect(report).toMatchObject({ blocked: 0, warnings: 1 });
+    expect(depsExitCode(report, 'error')).toBe(0);
+    expect(depsExitCode(report, 'warning')).toBe(1);
+    expect(depsToRunResult(report).files[0].issues.map((i) => i.ruleId)).toEqual(['ai-guard/deps/fresh-release']);
+
+    repo!.write('.npmrc', 'min-release-age=1\n');
+    const covered = await run();
+    expect(covered.cooldown).toMatchObject({ manager: 'npm', minutes: 1440 });
+    expect(covered.cooldownTip).toBeNull();
+    expect(covered.warnings).toBe(0);
+  }
+
   it('does not count a version change or a dependency moved between fields as added', async () => {
     repo = createTempRepo({ 'package.json': manifest({ lodash: '^4.0.0' }, { react: '^18.0.0' }) });
     repo.commit('initial');

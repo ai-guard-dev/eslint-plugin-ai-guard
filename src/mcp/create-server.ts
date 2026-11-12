@@ -219,6 +219,7 @@ const checkPackageOutput = {
       weeklyDownloads: z.number().nullable(),
       installScripts: z.array(z.string()),
       deprecated: z.string().nullable(),
+      publishedAt: z.string().nullable().optional(),
     }).optional(),
     similarTo: z.string().optional(),
   })),
@@ -328,11 +329,12 @@ export function createMcpServer(root: string): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, args => invoke(() => fixFile(args, workspace)));
   server.registerTool('ai_guard_check_package', {
-    description: 'Check npm packages before installing or running them (npm install, npx). Reports names that do not exist (often invented by assistants), look-alikes of popular packages, new or rarely downloaded packages, install scripts, deprecations and npm security placeholders. verdict "block" means do not install; use the package named in similarTo or check the name. Contacts registry.npmjs.org and api.npmjs.org; packages from a private registry are skipped. Installs nothing.',
+    description: 'Check npm packages before installing or running them (npm install, npx). Reports names that do not exist (often invented by assistants), look-alikes of popular packages, new or rarely downloaded packages, install scripts, deprecations, npm security placeholders and releases published in the last day. verdict "block" means do not install; use the package named in similarTo or check the name. A fresh-release finding means ask the user or install the previous version. Contacts registry.npmjs.org and api.npmjs.org; packages from a private registry are skipped. Installs nothing.',
     inputSchema: {
       packages: z.array(z.string().min(1).max(256)).min(1).max(MAX_PACKAGES).describe('Package names, optionally with a version or dist-tag: "lodash", "react@18.3.1", "@types/node"'),
       minAgeDays: z.number().int().min(0).max(3650).optional().describe('Packages first published fewer days ago count as new (default 30)'),
       minWeeklyDownloads: z.number().int().min(0).optional().describe('Fewer weekly downloads count as rarely used (default 100)'),
+      freshHours: z.number().min(0).max(720).optional().describe('Versions published fewer hours ago are fresh releases (default 24; 0 turns the check off)'),
     },
     outputSchema: checkPackageOutput,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },

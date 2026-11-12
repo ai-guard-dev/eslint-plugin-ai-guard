@@ -99,7 +99,8 @@ export type DependencyCheck =
   | 'new-package'
   | 'low-downloads'
   | 'install-script'
-  | 'deprecated';
+  | 'deprecated'
+  | 'fresh-release';
 
 export const DEPENDENCY_CHECKS: Record<DependencyCheck, CheckInfo> = {
   'package-not-found': { severity: 'error', title: 'Package does not exist on npm', remediation: 'Check the package name; AI assistants often invent names that anyone could register later.' },
@@ -112,6 +113,7 @@ export const DEPENDENCY_CHECKS: Record<DependencyCheck, CheckInfo> = {
   'low-downloads': { severity: 'warning', title: 'Package is rarely downloaded', remediation: 'Check that it is maintained and is the package you meant.' },
   'install-script': { severity: 'warning', title: 'Package runs code on install', remediation: 'Install scripts run with your permissions; make sure you trust the package.' },
   'deprecated': { severity: 'warning', title: 'Package version is deprecated', remediation: 'Follow the deprecation message, usually to a maintained replacement.' },
+  'fresh-release': { severity: 'warning', title: 'Version was published in the last day', remediation: 'Install the previous version, or wait until the release is a day old; hijacked releases are usually found and removed within hours. A release cooldown in the package manager (npm min-release-age) does this for every install.' },
 };
 
 export interface VirtualRuleMeta {

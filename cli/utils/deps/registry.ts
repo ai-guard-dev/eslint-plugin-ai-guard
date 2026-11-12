@@ -7,9 +7,11 @@
  * time out quickly and failures surface as RegistryError, which callers report
  * as "could not check" and never as a finding.
  *
- * Cache: <tmp>/ai-guard/registry-cache (AI_GUARD_CACHE_DIR overrides). Found
- * packages are kept for a day; "not found" for ten minutes, because anyone can
- * register a missing name at any moment.
+ * Cache: <tmp>/ai-guard/registry-cache (AI_GUARD_CACHE_DIR overrides).
+ * Answers that a publish can change (package documents, dist-tags such as
+ * "latest") and "not found" are kept for ten minutes: anyone can register a
+ * missing name, and a new release must not hide behind yesterday's answer.
+ * Exact versions, publish times and download counts are kept for a day.
  */
 
 import crypto from 'crypto';
@@ -50,6 +52,8 @@ export interface VersionFacts {
   installScripts: string[];
   /** npm replaced a removed (usually malicious) package with a placeholder. */
   securityHolder: boolean;
+  /** Tarball URL (dist.tarball), used to read the publish time cheaply. */
+  tarball: string | null;
 }
 
 export interface PackageDocument {
@@ -57,6 +61,8 @@ export interface PackageDocument {
   createdAt: string | null;
   distTags: Record<string, string>;
   versions: Record<string, VersionFacts>;
+  /** Publish time of each version (the document's "time" field). */
+  publishedAt: Record<string, string>;
 }
 
 export type VersionLookup =
@@ -77,6 +83,8 @@ export interface RegistryClientOptions {
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOT_FOUND_TTL = 10 * 60 * 1000;
+/** Answers a publish can change. */
+const MUTABLE_TTL = 10 * 60 * 1000;
 const USER_AGENT = `ai-guard/${PKG_VERSION} (+https://github.com/ai-guard-dev/eslint-plugin-ai-guard)`;
 
 export function defaultCacheDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -97,6 +105,7 @@ interface RawVersion {
   gypfile?: unknown;
   description?: unknown;
   repository?: unknown;
+  dist?: { tarball?: unknown };
 }
 
 export function versionFacts(raw: RawVersion, fallbackVersion = ''): VersionFacts {
@@ -111,6 +120,7 @@ export function versionFacts(raw: RawVersion, fallbackVersion = ''): VersionFact
     deprecated: typeof raw.deprecated === 'string' && raw.deprecated.trim() !== '' ? raw.deprecated.trim() : null,
     installScripts,
     securityHolder: /-security$/.test(version) && (/security holding package/i.test(description) || /npm\/security-holder/i.test(repo)),
+    tarball: raw.dist && typeof raw.dist.tarball === 'string' && /^https?:\/\//i.test(raw.dist.tarball) ? raw.dist.tarball : null,
   };
 }
 
@@ -140,13 +150,18 @@ export class RegistryClient {
       const raw = await this.json<{ name?: string; time?: Record<string, string>; 'dist-tags'?: Record<string, string>; versions?: Record<string, RawVersion> }>(res);
       const versions: Record<string, VersionFacts> = {};
       for (const [v, manifest] of Object.entries(raw.versions ?? {})) versions[v] = versionFacts(manifest, v);
+      const publishedAt: Record<string, string> = {};
+      for (const [v, when] of Object.entries(raw.time ?? {})) {
+        if (v !== 'created' && v !== 'modified' && typeof when === 'string') publishedAt[v] = when;
+      }
       const doc: PackageDocument = {
         name: raw.name ?? name,
         createdAt: raw.time?.created ?? null,
         distTags: raw['dist-tags'] ?? {},
         versions,
+        publishedAt,
       };
-      return { value: doc, ttl: DAY };
+      return { value: doc, ttl: MUTABLE_TTL };
     });
   }
 
@@ -160,7 +175,28 @@ export class RegistryClient {
         return { value, ttl: NOT_FOUND_TTL };
       }
       const raw = await this.json<RawVersion>(res);
-      return { value: { status: 'ok', facts: versionFacts(raw, versionOrTag) } as VersionLookup, ttl: DAY };
+      // A dist-tag moves on every release; an exact version does not change.
+      const exact = typeof raw.version === 'string' && raw.version === versionOrTag.replace(/^v/i, '');
+      return { value: { status: 'ok', facts: versionFacts(raw, versionOrTag) } as VersionLookup, ttl: exact ? DAY : MUTABLE_TTL };
+    });
+  }
+
+  /**
+   * When a version was published, read from its tarball's Last-Modified header
+   * (a HEAD request; nothing is downloaded). Compared with the registry's own
+   * publish times, the header is a few seconds after the publish for current
+   * releases, and later still for some re-uploaded old tarballs, but never
+   * earlier. So it can make a release look newer than it is, never older.
+   * Null when the header is missing or the tarball is not on the registry host.
+   */
+  getPublishTime(name: string, version: string, tarball: string): Promise<string | null> {
+    return this.cached(`published:${name}@${version}`, async () => {
+      // Requests go to the registry only, whatever URL a document names.
+      if (new URL(tarball).host !== new URL(this.endpoints.registry).host) return { value: null, ttl: NOT_FOUND_TTL };
+      const res = await this.request(tarball, false, 'HEAD');
+      const header = res.status === 200 ? res.headers.get('last-modified') : null;
+      const when = header ? Date.parse(header) : Number.NaN;
+      return { value: Number.isNaN(when) ? null : new Date(when).toISOString(), ttl: Number.isNaN(when) ? NOT_FOUND_TTL : DAY };
     });
   }
 
@@ -198,10 +234,11 @@ export class RegistryClient {
     }));
   }
 
-  private async request(url: string, retried = false): Promise<Response> {
+  private async request(url: string, retried = false, method: 'GET' | 'HEAD' = 'GET'): Promise<Response> {
     let res: Response;
     try {
       res = await this.fetchImpl(url, {
+        method,
         headers: { 'user-agent': USER_AGENT, accept: 'application/json' },
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -214,13 +251,13 @@ export class RegistryClient {
       await res.body?.cancel();
       const seconds = Number(res.headers.get('retry-after'));
       await new Promise((resolve) => setTimeout(resolve, Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 2) * 1000 : 1000));
-      return this.request(url, true);
+      return this.request(url, true, method);
     }
     if (res.status !== 200 && res.status !== 404) {
       throw new RegistryError('BAD_RESPONSE', `${new URL(url).host} answered HTTP ${res.status}`);
     }
     const length = Number(res.headers.get('content-length') ?? 0);
-    if (length > this.maxBytes) {
+    if (method === 'GET' && length > this.maxBytes) {
       await res.body?.cancel();
       throw new RegistryError('TOO_LARGE', `The package document is ${Math.round(length / 1e6)} MB, too large to check`);
     }

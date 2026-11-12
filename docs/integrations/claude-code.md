@@ -122,6 +122,7 @@ Before Claude runs `npm install`, `pnpm add`, `yarn add`, `bun add`, `npx`, `pnp
 |---|---|
 | The package or version doesn't exist, or npm replaced it with a security placeholder | **Denied.** Claude sees why ("does not exist on npm … Did you mean `express`?") and fixes the name. Nothing is installed. |
 | A look-alike of a popular package, or an install script, on a new or rarely used package | **You are asked** to confirm, and Claude is told why. |
+| The version was published in the last 24 hours (`AI_GUARD_FRESH_HOURS`), and the package manager has no release cooldown that covers it | **You are asked**, with the setting that turns a cooldown on. If you decline, Claude installs the previous version or waits. |
 | A single warning (deprecated, new, rarely used) | The command runs; Claude gets a note. |
 | Clean, private-registry packages, `npx` for a locally installed tool, no network | Nothing; the command runs. |
 

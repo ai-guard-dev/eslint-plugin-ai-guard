@@ -75,7 +75,8 @@ describe('PreToolUse install check', () => {
     expect(await run('npm i lodash react')).toBeNull();
     expect(await run('npm ci && npm test')).toBeNull();
     expect(await run('git status')).toBeNull();
-    expect(registry.requests.filter((r) => !r.endsWith('/latest'))).toEqual([]);
+    // Popular packages: the version manifest and a HEAD of the tarball for its publish time.
+    expect(registry.requests.filter((r) => !r.endsWith('/latest') && !r.startsWith('HEAD '))).toEqual([]);
   });
 
   it('does nothing unless it was switched on', async () => {

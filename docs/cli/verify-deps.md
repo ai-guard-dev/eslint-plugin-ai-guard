@@ -19,6 +19,7 @@ ai-guard verify-deps --all              # every dependency in the repository
 | `--fail-on <level>` | Exit 1 on `error` (default), `warning`, or `none` |
 | `--min-age <days>` | Packages first published fewer days ago count as new (default 30) |
 | `--min-downloads <count>` | Fewer weekly downloads count as rarely used (default 100) |
+| `--fresh-hours <hours>` | Versions published fewer hours ago are fresh releases (default 24; `0` turns the check off) |
 
 **Exit codes:** `0` nothing at the `--fail-on` level, `1` findings at that level, `2` some packages could not be checked (no network, rate limit) or Git failed. A check that didn't run is never a pass.
 
@@ -30,11 +31,11 @@ Not checked: workspace packages (any `package.json` name in the repository), and
 
 ## Network and privacy
 
-`verify-deps` contacts `registry.npmjs.org` and `api.npmjs.org`. Results are cached for a day (ten minutes for "does not exist", because anyone can register a missing name at any moment) in `<tmp>/ai-guard/registry-cache`; set `AI_GUARD_CACHE_DIR` to change that.
+`verify-deps` contacts `registry.npmjs.org` and `api.npmjs.org`. Results are cached in `<tmp>/ai-guard/registry-cache` (set `AI_GUARD_CACHE_DIR` to change that): exact versions, publish times and download counts for a day; package documents, dist-tags such as `latest`, and "does not exist" for ten minutes, because a release or a newly registered name can change the answer at any moment.
 
 Packages from a **private registry are skipped**, so their names are never sent to the public registry. AI Guard reads the registry settings that npm, pnpm, yarn and bun use: `npm_config_registry` and similar environment variables, `.npmrc` (project and user), `.yarnrc.yml`, `.yarnrc` and `bunfig.toml`. That covers both a default registry and a scope (`@acme:registry=...`). Before reporting that a package doesn't exist, it asks `npm config get registry` too.
 
-Well-known packages (the 5,000 most downloaded, bundled with AI Guard) need one small request each. Others need the package document and its download count.
+Well-known packages (the 5,000 most downloaded, bundled with AI Guard) need one small request each, plus a `HEAD` request for the tarball's publish time. Others need the package document and its download count.
 
 ## Blocking checks
 
@@ -84,10 +85,29 @@ Runs code on install. Native modules do this routinely; make sure you trust the 
 
 The version is marked deprecated on npm, with the maintainer's message (`request`, `@types/cookie`).
 
+### fresh-release
+
+The version that would be installed was published less than `--fresh-hours` hours ago (default 24). A hijacked maintainer account publishes a malicious release like any other: the compromised axios 1.14.1 was live for about three hours in March 2026 before it was removed. Waiting a day avoids most of these. The message names the release before it when it is known; install that one, or wait.
+
+Which version is checked: the exact version or dist-tag you asked for, or the latest release. For a range (`^5.2.0`), only when the latest release is in the range, because that is what a fresh install picks. Ranges AI Guard cannot evaluate (`||`, hyphen ranges, `<`) are skipped. A package that is itself new is reported as `new-package` instead.
+
+**Release cooldowns.** If the project's package manager already refuses releases younger than the window, the check is skipped: it would only repeat what the package manager does. A shorter cooldown narrows the check to releases the package manager would still install. AI Guard reads:
+
+| Package manager | Setting | Unit | Exclusions |
+|---|---|---|---|
+| npm 11.10+ | `min-release-age` in `.npmrc` (or `npm_config_min_release_age`) | days | `min-release-age-exclude` |
+| pnpm 10.16+ | `minimumReleaseAge` in `pnpm-workspace.yaml` (or `minimum-release-age` in `.npmrc`); pnpm 11 defaults to 1440 when `packageManager` names it | minutes | `minimumReleaseAgeExclude` |
+| Yarn 4.10+ | `npmMinimalAgeGate` in `.yarnrc.yml` (or `YARN_NPM_MINIMAL_AGE_GATE`) | minutes, or `1d`, `12h` | `npmPreapprovedPackages` |
+| Bun 1.3+ | `minimumReleaseAge` under `[install]` in `bunfig.toml` | seconds | `minimumReleaseAgeExcludes` |
+
+The package manager is taken from `packageManager` in `package.json`, then from the lockfile. When no cooldown is configured, `verify-deps` prints how to turn one on (with `--all`, or when it finds a fresh release); the JSON report has `packageManager`, `cooldown` and `cooldownTip`. A cooldown is the better fix: it covers every install, including the ones AI Guard never sees.
+
+**How the publish time is read.** Documents of popular packages can be tens of megabytes. For those, AI Guard sends a `HEAD` request for the version's tarball and reads its `Last-Modified` header. Compared with the registry's own publish times, it is a few seconds later for current releases and never earlier, so the check cannot miss a fresh release this way. Some re-uploaded old tarballs carry a later date; that can only cause a warning, never hide one.
+
 ## In Claude Code and MCP
 
-- **Hook:** `ai-guard init-claude --check-installs` adds a check before Claude runs `npm install`, `pnpm add`, `yarn add`, `bun add`, `npx`, `pnpm dlx` or `npm create`. It is off by default. Missing names are blocked and Claude is told why; look-alikes and unknown install scripts ask you first. See [Claude Code integration](../integrations/claude-code.md#package-check-before-install).
-- **MCP tool:** `ai_guard_check_package` lets an agent check packages before it adds them. See [MCP server](../mcp-server.md).
+- **Hook:** `ai-guard init-claude --check-installs` adds a check before Claude runs `npm install`, `pnpm add`, `yarn add`, `bun add`, `npx`, `pnpm dlx` or `npm create`. It is off by default. Missing names are blocked and Claude is told why; look-alikes, unknown install scripts and releases from the last day ask you first. `AI_GUARD_FRESH_HOURS` changes the window for the hook (`0` turns it off). The cooldown is read for the package manager that runs the install; `npx` and `dlx` downloads are not assumed to honour it. See [Claude Code integration](../integrations/claude-code.md#package-check-before-install).
+- **MCP tool:** `ai_guard_check_package` lets an agent check packages before it adds them (`freshHours` sets the window). A fresh release makes `safeToInstall` false. See [MCP server](../mcp-server.md).
 
 ## GitHub Actions
 

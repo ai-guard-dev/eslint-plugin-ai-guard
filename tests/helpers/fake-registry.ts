@@ -14,6 +14,10 @@ export interface FakeVersion {
   description?: string;
   repository?: { type: string; url: string };
   gypfile?: boolean;
+  /** Publish time (default: the package's creation time). */
+  published?: string;
+  /** Last-Modified of the tarball (default: 2 s after the publish, as measured on the real registry); null: no header. */
+  tarballModified?: string | null;
 }
 
 export interface FakePackage {
@@ -42,15 +46,18 @@ export function established(downloads = 50_000, extra: FakeVersion = {}): FakePa
   return { created: daysAgo(2000), latest: '1.0.0', versions: { '1.0.0': extra }, downloads };
 }
 
-function manifest(name: string, version: string, v: FakeVersion): Record<string, unknown> {
-  return { name, version, ...v };
+function manifest(base: string, name: string, version: string, v: FakeVersion): Record<string, unknown> {
+  const { published: _published, tarballModified: _modified, ...fields } = v;
+  const file = `${name.split('/').pop()}-${version}.tgz`;
+  return { name, version, ...fields, dist: { tarball: `${base}/${name}/-/${file}` } };
 }
 
 export async function startFakeRegistry(packages: Record<string, FakePackage>, options: { delayMs?: number } = {}): Promise<FakeRegistry> {
   const requests: string[] = [];
+  let base = '';
   const server = http.createServer((req, res) => {
     const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
-    requests.push(url);
+    requests.push(req.method === 'HEAD' ? `HEAD ${url}` : url);
     const send = (status: number, body: unknown): void => {
       const text = JSON.stringify(body);
       res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
@@ -76,22 +83,33 @@ export async function startFakeRegistry(packages: Record<string, FakePackage>, o
       const name = parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
       const rest = parts.slice(name.startsWith('@') ? 2 : 1);
       const pkg = packages[name];
+      if (rest[0] === '-' && rest.length === 2) {
+        // Tarball: only HEAD is used. Last-Modified as the real registry's CDN sends it.
+        const version = pkg && Object.keys(pkg.versions).find((v) => rest[1] === `${name.split('/').pop()}-${v}.tgz`);
+        if (!pkg || !version) { res.writeHead(404); res.end(); return; }
+        const v = pkg.versions[version];
+        const modified = v.tarballModified === undefined ? new Date(Date.parse(v.published ?? pkg.created) + 2000).toUTCString() : v.tarballModified === null ? null : new Date(v.tarballModified).toUTCString();
+        res.writeHead(200, { 'content-type': 'application/octet-stream', ...(modified ? { 'last-modified': modified } : {}) });
+        res.end();
+        return;
+      }
       if (rest.length === 0) {
         if (!pkg) return send(404, { error: 'Not found' });
-        const versions = Object.fromEntries(Object.entries(pkg.versions).map(([v, data]) => [v, manifest(name, v, data)]));
-        return send(200, { name, 'dist-tags': { latest: pkg.latest, ...pkg.distTags }, time: { created: pkg.created }, versions });
+        const versions = Object.fromEntries(Object.entries(pkg.versions).map(([v, data]) => [v, manifest(base, name, v, data)]));
+        const time = Object.fromEntries(Object.entries(pkg.versions).map(([v, data]) => [v, data.published ?? pkg.created]));
+        return send(200, { name, 'dist-tags': { latest: pkg.latest, ...pkg.distTags }, time: { created: pkg.created, modified: pkg.created, ...time }, versions });
       }
       if (!pkg) return send(404, 'Not Found');
       const wanted = rest.join('/');
       const version = pkg.versions[wanted] ? wanted : wanted === 'latest' ? pkg.latest : pkg.distTags?.[wanted];
       if (!version || !pkg.versions[version]) return send(404, `version not found: ${wanted}`);
-      return send(200, manifest(name, version, pkg.versions[version]));
+      return send(200, manifest(base, name, version, pkg.versions[version]));
     };
     if (options.delayMs) setTimeout(respond, options.delayMs);
     else respond();
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
     endpoints: { registry: base, downloads: base },
     requests,

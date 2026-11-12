@@ -23,7 +23,7 @@ import { emitGitHubAnnotations } from '../utils/github-summary.js';
 import { isGitHubActions } from '../utils/git-diff.js';
 import { PKG_VERSION } from '../utils/version.js';
 import { depsExitCode, depsToRunResult, verifyDeps, type DepsReport, type DepsReportItem } from '../utils/deps/verify-deps.js';
-import { DEFAULT_MIN_AGE_DAYS, DEFAULT_MIN_WEEKLY_DOWNLOADS } from '../utils/deps/assess.js';
+import { DEFAULT_FRESH_HOURS, DEFAULT_MIN_AGE_DAYS, DEFAULT_MIN_WEEKLY_DOWNLOADS } from '../utils/deps/assess.js';
 
 /** Code Scanning slot for this scan, separate from the main "ai-guard" slot. */
 export const DEPS_AUTOMATION_ID = 'ai-guard-deps';
@@ -78,6 +78,12 @@ function printReport(report: DepsReport): void {
     if (noisy.length === 0) log.success(`${count(report.checked, 'package')} checked, nothing to report`);
   }
   for (const e of report.errors) log.warn(e.message);
+  // The cooldown tip is shown when it is relevant: a fresh release was found, or every dependency was checked.
+  const fresh = report.packages.some((p) => p.findings.some((f) => f.check === 'fresh-release'));
+  if (report.cooldownTip && (fresh || report.mode === 'all')) {
+    log.blank();
+    log.info(`No release cooldown is configured. To have the package manager wait a day before installing new releases, ${report.cooldownTip}.`);
+  }
   log.blank();
 }
 
@@ -90,7 +96,7 @@ function positiveInt(value: string, name: string): number {
 export function registerVerifyDepsCommand(program: Command): void {
   program
     .command('verify-deps [packages...]')
-    .description('Check npm packages before they are installed: the dependencies a change adds, or packages you name. Flags names that do not exist, look-alikes of popular packages, new or rarely used packages, install scripts and deprecations. Uses the npm registry.')
+    .description('Check npm packages before they are installed: the dependencies a change adds, or packages you name. Flags names that do not exist, look-alikes of popular packages, new or rarely used packages, install scripts, deprecations and releases published in the last day. Uses the npm registry.')
     .option('--base <ref>', 'Check dependencies added since the merge-base with this ref')
     .option('--staged', 'Check dependencies added in staged changes')
     .option('--all', 'Check every dependency in the repository, not only added ones')
@@ -100,7 +106,8 @@ export function registerVerifyDepsCommand(program: Command): void {
     .option('--fail-on <level>', 'Exit 1 on: error (default) | warning | none', 'error')
     .option('--min-age <days>', `Packages first published fewer days ago count as new (default ${DEFAULT_MIN_AGE_DAYS})`)
     .option('--min-downloads <count>', `Fewer weekly downloads count as rarely used (default ${DEFAULT_MIN_WEEKLY_DOWNLOADS})`)
-    .action(async (packages: string[], opts: { base?: string; staged?: boolean; all?: boolean; json?: boolean; sarif?: boolean; sarifOutput?: string; failOn: string; minAge?: string; minDownloads?: string }) => {
+    .option('--fresh-hours <hours>', `Versions published fewer hours ago are fresh releases (default ${DEFAULT_FRESH_HOURS}; 0 turns the check off)`)
+    .action(async (packages: string[], opts: { base?: string; staged?: boolean; all?: boolean; json?: boolean; sarif?: boolean; sarifOutput?: string; failOn: string; minAge?: string; minDownloads?: string; freshHours?: string }) => {
       if (!['error', 'errors', 'warning', 'warnings', 'any', 'none'].includes(opts.failOn)) {
         log.error(`Unknown --fail-on level '${opts.failOn}'. Use error, warning or none.`);
         process.exit(2);
@@ -113,16 +120,18 @@ export function registerVerifyDepsCommand(program: Command): void {
       }
       let minAgeDays: number | undefined;
       let minWeeklyDownloads: number | undefined;
+      let freshHours: number | undefined;
       try {
         if (opts.minAge !== undefined) minAgeDays = positiveInt(opts.minAge, '--min-age');
         if (opts.minDownloads !== undefined) minWeeklyDownloads = positiveInt(opts.minDownloads, '--min-downloads');
+        if (opts.freshHours !== undefined) freshHours = positiveInt(opts.freshHours, '--fresh-hours');
       } catch (error) {
         log.error(error instanceof Error ? error.message : String(error));
         process.exit(2);
         return;
       }
 
-      const report = await verifyDeps({ cwd: process.cwd(), base: opts.base, staged: opts.staged, all: opts.all, packages, minAgeDays, minWeeklyDownloads });
+      const report = await verifyDeps({ cwd: process.cwd(), base: opts.base, staged: opts.staged, all: opts.all, packages, minAgeDays, minWeeklyDownloads, freshHours });
       const exitCode = depsExitCode(report, opts.failOn);
       const machineOutput = opts.json || (opts.sarif && !opts.sarifOutput);
 
