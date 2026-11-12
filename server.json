@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://getaiguard.dev/",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "eslint-plugin-ai-guard",
-      "version": "1.4.5",
+      "version": "1.4.6",
       "runtimeHint": "npx",
       "runtimeArguments": [
         { "type": "positional", "value": "-y" },

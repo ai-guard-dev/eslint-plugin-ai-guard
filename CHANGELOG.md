@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.4.6] — 2026-11-12
 
 ### Added
 - Fresh-release check (`ai-guard/deps/fresh-release`, warning): the version being installed was published in the last 24 hours (`verify-deps --fresh-hours`, `AI_GUARD_FRESH_HOURS`, MCP `freshHours`; `0` turns it off). The install hook asks the user (Codex: denies with the reason), `verify-deps` warns, and `ai_guard_check_package` returns `safeToInstall: false`. Ranges are checked when the latest release is in the range. Skipped when the package manager's release cooldown covers the window: npm `min-release-age`, pnpm `minimumReleaseAge` (including pnpm 11's default), Yarn `npmMinimalAgeGate`, Bun `minimumReleaseAge`, with their exclusion lists. Without a cooldown, `verify-deps` says how to turn one on.
@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - The registry cache kept `latest` and package documents for a day, so a release published since the last check was not seen. Answers a publish can change are now kept for ten minutes; exact versions still for a day.
 
-## [1.4.5]
+## [1.4.5] — 2026-11-12
 
 ### Added — every agent, every commit
 - `ai-guard init-hooks`: AI Guard's hooks for **Cursor** and **Codex** as well as Claude Code, from one command (agents detected from `.claude/`, `.cursor/`, `.codex/`). Codex: edit feedback after `apply_patch`, the finish gate, session snapshot, command guard (Codex cannot ask the user, so "ask" becomes a deny that tells the agent to ask). Cursor: finish gate through `followup_message`, session snapshot, command guard through `beforeShellExecution`; a hook with nothing to say prints nothing, never `allow`. Payloads with a byte-order mark (Windows PowerShell) are accepted.
