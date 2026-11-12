@@ -16,6 +16,9 @@ import { registerIntegrityCommand } from './commands/integrity.js';
 import { registerScanAgentConfigCommand } from './commands/scan-agent-config.js';
 import { registerVerifyCommand } from './commands/verify.js';
 import { registerVerifyDepsCommand } from './commands/verify-deps.js';
+import { registerInitHooksCommand } from './commands/init-hooks.js';
+import { registerInitGitHookCommand } from './commands/init-git-hook.js';
+import { registerInitOxlintCommand } from './commands/init-oxlint.js';
 import { log } from './utils/logger.js';
 
 // ─── Version resolution ───────────────────────────────────────────────────────
@@ -73,6 +76,9 @@ registerClaudeHookCommand(program);
 registerScanAgentConfigCommand(program);
 registerVerifyCommand(program);
 registerVerifyDepsCommand(program);
+registerInitHooksCommand(program);
+registerInitGitHookCommand(program);
+registerInitOxlintCommand(program);
 
 // ─── Global error handling ────────────────────────────────────────────────────
 

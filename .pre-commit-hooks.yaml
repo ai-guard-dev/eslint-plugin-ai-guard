@@ -1,0 +1,14 @@
+- id: ai-guard-verify
+  name: AI Guard verify
+  description: Block commits that add placeholder code, weakened or focused tests, leaked secrets or agent-config issues. Pre-existing problems never block.
+  entry: npx --no ai-guard verify --staged --allow-unverified
+  language: system
+  pass_filenames: false
+  always_run: true
+- id: ai-guard-verify-deps
+  name: AI Guard verify-deps
+  description: Check npm dependencies a commit adds (missing names, look-alikes of popular packages, install scripts). Uses the npm registry.
+  entry: npx --no ai-guard verify-deps --staged
+  language: system
+  pass_filenames: false
+  files: (^|/)package\.json$

@@ -117,11 +117,11 @@ describe('init-claude: mergeAiGuardHook', () => {
     expect(settings.hooks!.PostToolUse![0].matcher).toBe('Edit|MultiEdit|Write');
     expect(settings.hooks!.PostToolUse![0].hooks[0].type).toBe('command');
     expect(settings.hooks!.PostToolUse![0].hooks[0].command).toContain('ai-guard');
-    expect(settings.hooks!.PostToolUse![0].hooks[0].command).toContain('claude-hook');
+    expect(settings.hooks!.PostToolUse![0].hooks[0].command).toContain('ai-guard-hook');
     // Stop and SessionStart have no matcher support.
-    expect(settings.hooks!.Stop).toEqual([{ hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' }] }]);
-    expect(settings.hooks!.SessionStart).toEqual([{ hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' }] }]);
-    expect(settings.hooks!.PreToolUse).toEqual([{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' }] }]);
+    expect(settings.hooks!.Stop).toEqual([{ hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard-hook' }] }]);
+    expect(settings.hooks!.SessionStart).toEqual([{ hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard-hook' }] }]);
+    expect(settings.hooks!.PreToolUse).toEqual([{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard-hook' }] }]);
   });
 
   it('can skip the Stop/SessionStart hooks and the Bash guard', () => {
@@ -203,7 +203,7 @@ describe('init-claude: mergeAiGuardHook', () => {
           {
             matcher: 'Edit|Write',
             hooks: [
-              { type: 'command', command: 'node_modules/.bin/ai-guard claude-hook' },
+              { type: 'command', command: 'node_modules/.bin/ai-guard-hook' },
             ],
           },
         ],
@@ -222,7 +222,7 @@ describe('init-claude: mergeAiGuardHook', () => {
     const input = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo test' }] }] } };
     const { settings } = mergeAiGuardHook(input);
     expect(settings.hooks!.PreToolUse).toHaveLength(1);
-    expect(settings.hooks!.PreToolUse![0].hooks.map((h) => h.command)).toEqual(['echo test', 'node_modules/.bin/ai-guard claude-hook']);
+    expect(settings.hooks!.PreToolUse![0].hooks.map((h) => h.command)).toEqual(['echo test', 'node_modules/.bin/ai-guard-hook']);
   });
 
   it('does not mutate the original settings object', () => {

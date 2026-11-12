@@ -163,12 +163,20 @@ export async function verifyChange(options: VerifyOptions): Promise<VerifyReport
   if (toLint.length > 0) {
     const lineChanges = getLineChanges(changeSet, toLint.map((f) => f.path));
     try {
+      // Staged mode lints the staged content: a partially staged file differs from the disk.
+      const sources = changeSet.mode === 'staged'
+        ? Object.fromEntries(toLint.flatMap((f) => {
+          const text = readAfter(changeSet, f.path);
+          return text === null ? [] : [[path.join(root, f.path), text]];
+        }))
+        : undefined;
       const result = await runEslint({
         preset,
         targetPath: root,
         files: toLint.map((f) => path.join(root, f.path)),
         rules: verifyRuleLevels(preset),
         isolated: options.isolated,
+        sources,
       });
       report.lintedFiles = result.filesScanned;
       for (const parserError of result.parserErrors) {

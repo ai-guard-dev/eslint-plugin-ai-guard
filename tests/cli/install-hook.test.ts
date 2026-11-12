@@ -122,20 +122,20 @@ describe('PreToolUse install check', () => {
 describe('init-claude --check-installs', () => {
   it('adds the flag to a new PreToolUse hook covering Bash and PowerShell', () => {
     const { settings } = mergeAiGuardHook({}, { checkInstalls: true });
-    expect(settings.hooks!.PreToolUse).toEqual([{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard claude-hook --check-installs' }] }]);
+    expect(settings.hooks!.PreToolUse).toEqual([{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node_modules/.bin/ai-guard-hook --check-installs' }] }]);
   });
 
   it('turns it on in an existing setup, once', () => {
     const first = mergeAiGuardHook({}).settings;
     const upgraded = mergeAiGuardHook(first, { checkInstalls: true });
     expect(upgraded.changed).toBe(true);
-    expect(upgraded.settings.hooks!.PreToolUse![0].hooks[0].command).toBe('node_modules/.bin/ai-guard claude-hook --check-installs');
+    expect(upgraded.settings.hooks!.PreToolUse![0].hooks[0].command).toBe('node_modules/.bin/ai-guard-hook --check-installs');
     expect(mergeAiGuardHook(upgraded.settings, { checkInstalls: true }).changed).toBe(false);
   });
 
   it('keeps the bypass guard off when asked', () => {
     const { settings } = mergeAiGuardHook({}, { bashGuard: false, checkInstalls: true });
-    expect(settings.hooks!.PreToolUse![0].hooks[0].command).toBe('node_modules/.bin/ai-guard claude-hook --bash-guard off --check-installs');
+    expect(settings.hooks!.PreToolUse![0].hooks[0].command).toBe('node_modules/.bin/ai-guard-hook --bash-guard off --check-installs');
   });
 });
 

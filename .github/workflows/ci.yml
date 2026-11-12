@@ -32,4 +32,6 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm run lint:self
+      # AI Guard rules must give identical results under Oxlint (JS plugins).
+      - run: npm run test:oxlint
       - run: npm run docs:build

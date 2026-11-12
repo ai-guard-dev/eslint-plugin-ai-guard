@@ -15,7 +15,7 @@ export default defineConfig([
   },
   // CLI bundle — CJS only (required for shebang binary)
   {
-    entry: { 'cli/index': 'cli/index.ts' },
+    entry: { 'cli/index': 'cli/index.ts', 'cli/hook': 'cli/hook-entry.ts' },
     format: ['cjs'],
     dts: false,
     clean: false,

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ai-guard-dev/ai-guard",
+  "title": "AI Guard",
+  "description": "Guardrails for AI-written JS/TS: scans, weakened-test checks, package checks, verify before done.",
+  "repository": {
+    "url": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard",
+    "source": "github"
+  },
+  "websiteUrl": "https://getaiguard.dev/",
+  "version": "1.4.5",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "eslint-plugin-ai-guard",
+      "version": "1.4.5",
+      "runtimeHint": "npx",
+      "runtimeArguments": [
+        { "type": "positional", "value": "-y" },
+        { "type": "positional", "value": "-p" },
+        { "type": "positional", "value": "@typescript-eslint/parser" },
+        { "type": "positional", "value": "-p" }
+      ],
+      "packageArguments": [
+        { "type": "positional", "value": "ai-guard-mcp" }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

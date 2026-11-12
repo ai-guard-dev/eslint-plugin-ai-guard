@@ -2,9 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — supply chain
+## [1.4.5] — unreleased
 
-### Added
+### Added — every agent, every commit
+- `ai-guard init-hooks`: AI Guard's hooks for **Cursor** and **Codex** as well as Claude Code, from one command (agents detected from `.claude/`, `.cursor/`, `.codex/`). Codex: edit feedback after `apply_patch`, the finish gate, session snapshot, command guard (Codex cannot ask the user, so "ask" becomes a deny that tells the agent to ask). Cursor: finish gate through `followup_message`, session snapshot, command guard through `beforeShellExecution`; a hook with nothing to say prints nothing, never `allow`. Payloads with a byte-order mark (Windows PowerShell) are accepted.
+- `ai-guard-hook`: fast hook entry point. Shell commands that name no package manager, Git or AI Guard return in about 0.15 s instead of about 0.9 s. New `init-claude` setups use it; `ai-guard claude-hook` keeps working (now also `ai-guard hook --agent <name>`).
+- `ai-guard init-git-hook`: pre-commit gate running `verify --staged --allow-unverified` through husky, lefthook, simple-git-hooks or the repository's Git hooks, plus `.pre-commit-hooks.yaml` for the pre-commit framework (`ai-guard-verify`, `ai-guard-verify-deps`).
+- `verify --allow-unverified`: exit 0 instead of 2 when the change could not be fully verified, so a Git hook never blocks a commit because AI Guard itself failed.
+- `ai-guard init-oxlint` and Oxlint support: AI Guard's rules run as Oxlint JS plugins with identical results; CI runs all 27 rules through ESLint and Oxlint and fails on any difference (`npm run test:oxlint`).
+- MCP Registry: `server.json` and `mcpName` (`io.github.ai-guard-dev/ai-guard`), and a manual workflow that publishes to the registry after the npm release.
+
+### Fixed
+- `verify --staged` linted the working tree instead of the staged content, so a partially staged file could pass or fail on code that was not being committed.
+
+### Added — supply chain
 - `ai-guard verify-deps`: checks npm packages before they are installed: the dependencies a change adds to any package.json (default), every dependency (`--all`), or packages named on the command line. Blocks names that don't exist (often invented by AI assistants), exact versions that don't exist, npm security placeholders for removed malware, and look-alikes of popular packages or install scripts on new or rarely used packages. Warns on single signals: deprecated, new, rarely used, install script, look-alike name. Terminal, JSON and SARIF (`automationDetails.id: "ai-guard-deps"`) output; exit 2 when packages could not be checked.
 - MCP tool `ai_guard_check_package` returns a verdict per package and `safeToInstall` (9 tools in total).
 - Claude Code: opt-in package check before installs (`init-claude --check-installs`, plugin option `check_installs`, or `AI_GUARD_CHECK_INSTALLS=1`). The PreToolUse hook denies installs of packages that don't exist, asks you about suspicious ones, and passes warnings to Claude. Covers npm, pnpm, yarn, bun, npx, dlx and create commands in Bash and PowerShell.

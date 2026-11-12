@@ -39,6 +39,17 @@ export default defineConfig({
         ],
       },
       {
+        text: 'Integrations',
+        items: [
+          { text: 'Agent hooks (Claude Code, Cursor, Codex)', link: '/integrations/agents' },
+          { text: 'Claude Code', link: '/integrations/claude-code' },
+          { text: 'Pre-commit gate', link: '/integrations/git-hook' },
+          { text: 'Oxlint', link: '/integrations/oxlint' },
+          { text: 'MCP server', link: '/mcp-server' },
+          { text: 'GitHub Actions', link: '/github-actions' },
+        ],
+      },
+      {
         text: 'Rules',
         items: [
           { text: 'Rules Summary', link: '/rules' },

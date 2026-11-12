@@ -37,6 +37,12 @@ export interface RunOptions {
   inlineSuppressions?: InlineSuppressionMode;
   /** Rule levels merged over the preset (used by `verify` to raise its floor). */
   rules?: Record<string, RuleLevel>;
+  /**
+   * Source text for some of the explicit files, keyed by absolute path. Those
+   * files are linted from this text instead of the disk (`verify --staged`
+   * lints what is staged, which can differ from the working tree).
+   */
+  sources?: Record<string, string>;
 }
 
 /**
@@ -842,10 +848,21 @@ export async function runEslint(options: RunOptions): Promise<RunResult> {
 
   const eslint = runner.eslint as {
     lintFiles(patterns: string[]): Promise<typeof rawResults>;
+    lintText(code: string, options: { filePath: string; warnIgnored?: boolean }): Promise<typeof rawResults>;
   };
 
   try {
-    rawResults = await eslint.lintFiles(patterns);
+    const sources = options.sources
+      ? new Map(Object.entries(options.sources).map(([file, text]) => [path.resolve(targetBase, file), text]))
+      : null;
+    if (sources && explicitFiles) {
+      const fromText = explicitFiles.filter((f) => sources.has(f));
+      const fromDisk = explicitFiles.filter((f) => !sources.has(f));
+      const textResults = await Promise.all(fromText.map((f) => eslint.lintText(sources.get(f)!, { filePath: f, warnIgnored: false })));
+      rawResults = [...textResults.flat(), ...(fromDisk.length > 0 ? await eslint.lintFiles(fromDisk) : [])];
+    } else {
+      rawResults = await eslint.lintFiles(patterns);
+    }
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
 

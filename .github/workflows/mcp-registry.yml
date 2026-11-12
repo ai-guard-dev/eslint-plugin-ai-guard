@@ -1,0 +1,41 @@
+name: Publish to MCP Registry
+
+# Run after the version in package.json and server.json has been published to npm:
+# the registry checks that the npm package declares the same mcpName.
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC login for the io.github.ai-guard-dev namespace
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check server.json matches the published npm version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          node -e "
+            const s = require('./server.json');
+            if (s.version !== '$version' || s.packages.some(p => p.version !== '$version')) {
+              console.error('server.json versions must equal package.json version $version'); process.exit(1);
+            }
+            if (require('./package.json').mcpName !== s.name) { console.error('package.json mcpName must equal server.json name'); process.exit(1); }
+          "
+          npm view "eslint-plugin-ai-guard@$version" mcpName | grep -qx "$(node -p "require('./server.json').name")" \
+            || { echo "eslint-plugin-ai-guard@$version on npm does not declare this mcpName yet. Publish it to npm first."; exit 1; }
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher --help > /dev/null
+
+      - name: Publish
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

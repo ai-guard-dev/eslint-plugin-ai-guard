@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-ai-guard",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "GitHub-native guardrails for AI-generated code. ESLint plugin and GitHub Action for detecting async reliability issues, floating promises, empty catch blocks, hardcoded secrets, SQL injection, and more. SARIF-based GitHub Code Scanning integration with PR annotations and persistent security alerts.",
   "keywords": [
     "eslint",
@@ -39,7 +39,8 @@
   },
   "bin": {
     "ai-guard": "dist/cli/index.js",
-    "ai-guard-mcp": "dist/mcp/server.js"
+    "ai-guard-mcp": "dist/mcp/server.js",
+    "ai-guard-hook": "dist/cli/hook.js"
   },
   "files": [
     "dist",
@@ -59,7 +60,8 @@
     "lint:self": "node dist/cli/index.js run --path src",
     "lint:full": "node dist/cli/index.js run --path src --strict && node dist/cli/index.js run --path cli --strict",
     "init-context": "node dist/cli/index.js init-context",
-    "prepublishOnly": "npm run typecheck && npm run test && npm run lint && npm run build && npm run notices"
+    "prepublishOnly": "npm run typecheck && npm run test && npm run lint && npm run build && npm run notices",
+    "test:oxlint": "node scripts/oxlint-parity.mjs"
   },
   "peerDependencies": {
     "@typescript-eslint/parser": ">=6.0.0",
@@ -81,6 +83,7 @@
     "eslint": "^9.0.0",
     "js-yaml": "4.3.2",
     "ora": "^8.2.0",
+    "oxlint": "1.93.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitepress": "^1.3.4",
@@ -102,5 +105,6 @@
   },
   "homepage": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard#readme",
   "author": "YashJadhav21",
-  "license": "MIT"
+  "license": "MIT",
+  "mcpName": "io.github.ai-guard-dev/ai-guard"
 }

@@ -34,6 +34,9 @@ ai-guard run
 | [`integrity`](../integrity.md) | Detect changes that weaken checks vs a base revision | Before merging agent-written changes |
 | [`verify`](verify.md) | One verdict for the current change | Before calling work done or merging |
 | [`verify-deps`](verify-deps.md) | Check npm packages before they are installed | When a change adds dependencies |
+| [`init-hooks`](../integrations/agents.md) | Hooks for Claude Code, Cursor and Codex | Once per project |
+| [`init-git-hook`](../integrations/git-hook.md) | Pre-commit gate running `verify --staged` | Once per project |
+| [`init-oxlint`](../integrations/oxlint.md) | Run AI Guard in Oxlint | Projects that lint with Oxlint |
 | [`scan-agent-config`](scan-agent-config.md) | Check agent instructions and MCP config | When adding or reviewing agent config |
 | `changed --test-integrity` ([details](test-integrity.md)) | Flag weakened tests in a change | In pull requests |
 

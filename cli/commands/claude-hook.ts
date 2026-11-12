@@ -46,6 +46,7 @@ import { formatFindingsForAgent } from '../utils/integrity/report.js';
 import { verifyChange, type VerifyFinding, type VerifyReport } from '../utils/verify.js';
 import { guardInstallCommand, type InstallGuardOptions } from '../utils/deps/install-guard.js';
 import type { IntegrityFinding, IntegrityReport } from '../utils/integrity/types.js';
+import { isAgentName, normalizeHookInput, translateHookOutput, AGENTS, type AgentName, type EngineInput, type EngineOutput } from '../utils/hooks/agents.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,10 +146,15 @@ function readStdin(): Promise<string> {
 }
 
 /** Parse hook JSON from stdin. */
+export function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
 export function parseHookInput(raw: string): { input: HookInput | null; error?: string } {
   if (!raw || raw.trim() === '') return { input: null, error: 'Empty stdin — no hook payload received' };
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    // Windows PowerShell prefixes piped text with a byte-order mark.
+    const parsed = JSON.parse(stripBom(raw)) as unknown;
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { input: null, error: 'Hook payload is not a JSON object' };
     return { input: parsed as HookInput };
   } catch {
@@ -579,18 +585,39 @@ export function handleHookInput(input: HookInput, opts: HookOptions): Promise<Ho
   }
 }
 
+async function runInOrder(inputs: EngineInput[], opts: HookOptions, index = 0, out: EngineOutput[] = []): Promise<EngineOutput[]> {
+  if (index >= inputs.length) return out;
+  // One at a time: the engine keeps per-session state on disk.
+  out.push(await handleHookInput(inputs[index] as HookInput, opts));
+  return runInOrder(inputs, opts, index + 1, out);
+}
+
+/**
+ * Run one hook invocation for any supported agent: translate the agent's
+ * payload for the engine, run it, and translate the answer back. Null: print
+ * nothing.
+ */
+export async function runAgentHook(agent: AgentName, rawPayload: string, opts: HookOptions): Promise<Record<string, unknown> | null> {
+  const { input } = parseHookInput(rawPayload);
+  if (!input) return null;
+  const { event, inputs } = normalizeHookInput(agent, input);
+  return translateHookOutput(agent, event, await runInOrder(inputs, opts));
+}
+
 // ─── Command registration ─────────────────────────────────────────────────────
 
 export function registerClaudeHookCommand(program: Command): void {
   program
     .command('claude-hook')
+    .alias('hook')
     .description('Internal: Claude Code hook entry point (SessionStart, PostToolUse, Stop, PreToolUse:Bash — reads JSON from stdin)')
     .option('--file <path>', 'Override: lint this file and print findings as text (for debugging)')
     .option('--base <ref>', 'Compare integrity with merge-base(HEAD, <ref>) instead of the session start')
     .option('--bash-guard <mode>', 'Commands that skip Git hooks: ask (default) | deny | off', 'ask')
     .option('--isolated', 'Use the rules bundled with this CLI, for projects without AI Guard installed (Claude Code plugin)')
     .option('--check-installs', 'PreToolUse: check the npm packages in install commands against the npm registry before they run')
-    .action(async (opts: { file?: string; base?: string; bashGuard: string; isolated?: boolean; checkInstalls?: boolean }) => {
+    .option('--agent <name>', `Hook protocol of the calling agent: ${AGENTS.join(' | ')}`, 'claude')
+    .action(async (opts: { file?: string; base?: string; bashGuard: string; isolated?: boolean; checkInstalls?: boolean; agent: string }) => {
       const cwd = process.cwd();
 
       if (opts.file) {
@@ -611,14 +638,14 @@ export function registerClaudeHookCommand(program: Command): void {
       }
 
       const bashGuard: BashGuardMode = opts.bashGuard === 'deny' || opts.bashGuard === 'off' ? opts.bashGuard : 'ask';
-      const { input, error } = parseHookInput(await readStdin());
-      if (!input) {
-        if (error && process.env.AI_GUARD_DEBUG === '1') process.stderr.write(`[ai-guard] ${error}\n`);
+      if (!isAgentName(opts.agent)) {
+        if (process.env.AI_GUARD_DEBUG === '1') process.stderr.write(`[ai-guard] Unknown --agent '${opts.agent}'\n`);
         process.exit(0);
         return;
       }
+      const payload = await readStdin();
       try {
-        const output = await handleHookInput(input, {
+        const output = await runAgentHook(opts.agent, payload, {
           stateDir: process.env.AI_GUARD_STATE_DIR || DEFAULT_STATE_DIR,
           base: opts.base,
           bashGuard,

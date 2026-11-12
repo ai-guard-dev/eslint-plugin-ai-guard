@@ -81,7 +81,7 @@ At **SessionStart**, AI Guard snapshots the working tree (tracked and untracked 
 
 Session state (base, finding sets that already blocked, advisories already shown) is stored under `<os tmpdir>/ai-guard/claude-sessions/`, keyed by a hash of the session ID and repository. Set `AI_GUARD_STATE_DIR` to change the location.
 
-Use `--base <ref>` on the hook command to compare with a branch instead (for example `node_modules/.bin/ai-guard claude-hook --base main`).
+Use `--base <ref>` on the hook command to compare with a branch instead (for example `node_modules/.bin/ai-guard-hook --base main`).
 
 ## Accepting an intended weakening
 
@@ -145,20 +145,22 @@ npx ai-guard init-claude --check-installs # check packages before installs (uses
 
 **Generated configuration:**
 
+The hooks run `ai-guard-hook`, a fast entry point that exits in about 0.15 s for shell commands it does not need to check. Setups written by 1.4.x use `ai-guard claude-hook`, which keeps working. Cursor and Codex: see [Agent hooks](agents.md).
+
 ```json
 {
   "hooks": {
     "PostToolUse": [
-      { "matcher": "Edit|MultiEdit|Write", "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard claude-hook" }] }
+      { "matcher": "Edit|MultiEdit|Write", "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard-hook" }] }
     ],
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard claude-hook" }] }
+      { "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard-hook" }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard claude-hook" }] }
+      { "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard-hook" }] }
     ],
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard claude-hook" }] }
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node_modules/.bin/ai-guard-hook" }] }
     ]
   }
 }

@@ -71,7 +71,8 @@ export function registerVerifyCommand(program: Command): void {
     .option('--preset <name>', 'Lint preset: agent (default) | recommended | strict | security', 'agent')
     .option('--strict', 'Also fail when there are findings to disclose')
     .option('--json', 'Output the verdict as JSON')
-    .action(async (opts: { base?: string; staged?: boolean; preset: string; strict?: boolean; json?: boolean }) => {
+    .option('--allow-unverified', 'Exit 0 instead of 2 when the change could not be fully verified, so a Git hook never blocks a commit because AI Guard itself failed')
+    .action(async (opts: { base?: string; staged?: boolean; preset: string; strict?: boolean; json?: boolean; allowUnverified?: boolean }) => {
       if (!['agent', 'recommended', 'strict', 'security'].includes(opts.preset)) {
         log.error(`Unknown preset '${opts.preset}'. Valid presets: agent, recommended, strict, security`);
         process.exit(2);
@@ -83,7 +84,8 @@ export function registerVerifyCommand(program: Command): void {
         return;
       }
       const report = await verifyChange({ cwd: process.cwd(), base: opts.base, staged: opts.staged, preset: opts.preset as Preset });
-      const exitCode = verifyExitCode(report, opts.strict ?? false);
+      const verdict = verifyExitCode(report, opts.strict ?? false);
+      const exitCode = verdict === 2 && opts.allowUnverified ? 0 : verdict;
       if (opts.json) {
         process.stdout.write(JSON.stringify({ version: PKG_VERSION, ...report }, null, 2) + '\n');
       } else {

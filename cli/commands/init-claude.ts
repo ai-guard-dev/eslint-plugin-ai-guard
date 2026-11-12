@@ -42,7 +42,8 @@ export interface MergeOptions {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const AI_GUARD_HOOK_COMMAND = 'node_modules/.bin/ai-guard claude-hook';
+/** Fast hook entry point: exits in ~150 ms for shell commands it does not need to check. */
+const AI_GUARD_HOOK_COMMAND = 'node_modules/.bin/ai-guard-hook';
 const AI_GUARD_HOOK_MATCHER = 'Edit|MultiEdit|Write';
 /** Matcher written by AI Guard ≤ 1.4.1; still recognized when merging. */
 const LEGACY_HOOK_MATCHER = 'Edit|Write';
@@ -63,8 +64,8 @@ function isAiGuardHook(hook: ClaudeHookEntry): boolean {
   return (
     hook.type === 'command' &&
     typeof hook.command === 'string' &&
-    hook.command.includes('ai-guard') &&
-    hook.command.includes('claude-hook')
+    // ai-guard-hook (current) or 'ai-guard claude-hook' (written by 1.4.x).
+    (hook.command.includes('ai-guard-hook') || (hook.command.includes('ai-guard') && hook.command.includes('claude-hook')))
   );
 }
 

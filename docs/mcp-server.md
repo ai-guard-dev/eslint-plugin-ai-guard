@@ -6,6 +6,8 @@ This page describes the current source checkout, including changes not yet publi
 
 ## Setup
 
+Since 1.4.5, AI Guard is published to the official MCP Registry as `io.github.ai-guard-dev/ai-guard`, so clients that read the registry can install it by name. It runs `npx -y -p @typescript-eslint/parser -p eslint-plugin-ai-guard ai-guard-mcp`.
+
 For this checkout:
 
 ```sh
