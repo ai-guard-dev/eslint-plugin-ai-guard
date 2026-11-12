@@ -25,6 +25,11 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-guard-oxlint-parity-'));
 try {
   const corpus = path.join(work, 'corpus');
   fs.cpSync(path.join(root, 'tests', 'fixtures'), corpus, { recursive: true });
+  // A project of its own: no-undeclared-import reads every package.json up to the
+  // first directory with .git, and nothing above the temp directory may count
+  // (a ~/package.json would make results differ between machines).
+  fs.mkdirSync(path.join(work, '.git'));
+  fs.writeFileSync(path.join(corpus, 'package.json'), JSON.stringify({ name: 'ai-guard-oxlint-corpus', private: true, dependencies: { express: '^4.21.0' } }, null, 2));
   // Generated here so the repository never contains a raw invisible character.
   fs.writeFileSync(path.join(corpus, 'oxlint', 'invisible.js'), `export const user = 'admin${String.fromCharCode(0x200b)}user';\n`);
 
