@@ -24,8 +24,8 @@ try {
 }
 if (!/\b(?:npm|npx|pnpm|pnpx|yarn|bun|bunx|corepack)\b/.test(command)) process.exit(0);
 
-const cli = path.join(__dirname, '..', 'node_modules', 'eslint-plugin-ai-guard', 'dist', 'cli', 'index.js');
-spawnSync(process.execPath, [cli, 'claude-hook', '--isolated', '--check-installs', '--bash-guard', 'off'], {
+const cli = path.join(__dirname, '..', 'node_modules', 'eslint-plugin-ai-guard', 'dist', 'cli', 'hook.js');
+spawnSync(process.execPath, [cli, '--agent', 'claude', '--isolated', '--check-installs', '--bash-guard', 'off'], {
   input: raw,
   stdio: ['pipe', 'inherit', 'inherit'],
   timeout: 25000,
