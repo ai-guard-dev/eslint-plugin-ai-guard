@@ -2,7 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.4.4] — unreleased
+## [Unreleased] — supply chain
+
+### Added
+- `ai-guard verify-deps`: checks npm packages before they are installed: the dependencies a change adds to any package.json (default), every dependency (`--all`), or packages named on the command line. Blocks names that don't exist (often invented by AI assistants), exact versions that don't exist, npm security placeholders for removed malware, and look-alikes of popular packages or install scripts on new or rarely used packages. Warns on single signals: deprecated, new, rarely used, install script, look-alike name. Terminal, JSON and SARIF (`automationDetails.id: "ai-guard-deps"`) output; exit 2 when packages could not be checked.
+- MCP tool `ai_guard_check_package` returns a verdict per package and `safeToInstall` (9 tools in total).
+- Claude Code: opt-in package check before installs (`init-claude --check-installs`, plugin option `check_installs`, or `AI_GUARD_CHECK_INSTALLS=1`). The PreToolUse hook denies installs of packages that don't exist, asks you about suspicious ones, and passes warnings to Claude. Covers npm, pnpm, yarn, bun, npx, dlx and create commands in Bash and PowerShell.
+- Network use is limited to these features: `registry.npmjs.org` and `api.npmjs.org`, with a disk cache. Packages served by a private registry (`.npmrc`, `.yarnrc.yml`, `.yarnrc`, `bunfig.toml`, environment) are never looked up publicly. Lint, `verify` and every other command stay offline.
+- Bundled list of the 5,000 most-downloaded npm packages (from npm-high-impact, MIT), used to recognise well-known packages and look-alike names. Regenerate with `node scripts/generate-popular-packages.mjs`.
+
+### Changed
+- `init-context` guidance tells agents to check a package with `verify-deps` before adding it.
+
+---
+
+## [1.4.4] — 2026-11-08
 
 ### Added — agent safety
 - `ai-guard scan-agent-config`: scans agent instructions and MCP/agent config (CLAUDE.md, AGENTS.md, .cursorrules, skills, `.mcp.json`, Claude settings) for hidden Unicode text (decoded), instructions hidden in HTML comments, pipe-to-shell installs, concealment phrases, credential reads, exfiltration, unpinned MCP servers, inline secrets, plain-HTTP remotes, and risky Claude settings. Per-server fingerprints with an optional lock file. SARIF uses its own `ai-guard-agent-config` slot.

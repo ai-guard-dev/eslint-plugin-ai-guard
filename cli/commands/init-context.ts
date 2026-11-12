@@ -303,7 +303,7 @@ Good: el.textContent = user.bio;
 
 Rule: no-undeclared-import
 Bad:  import { helper } from 'package-not-in-package-json';
-Good: Confirm the package exists on npm, add it to package.json, then import it.
+Good: Check the package first (npx ai-guard verify-deps <name>), add it to package.json, then import it.
 
 Rule: no-invisible-unicode
 Bad:  Zero-width or bidi-override characters pasted into code or strings.

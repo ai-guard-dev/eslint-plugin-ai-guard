@@ -12,7 +12,7 @@ AI Guard integrates with [Claude Code](https://code.claude.com/docs/en/hooks) th
 | **PostToolUse** (`Edit\|MultiEdit\|Write`) | Lints the edited JS/TS file and checks that file for newly weakened checks. Findings are sent back to Claude. |
 | **SessionStart** | Records the working tree as the session's [check-integrity](../integrity.md) base. |
 | **Stop** | Before Claude finishes, runs check integrity on everything changed since the session started, then [verifies](../cli/verify.md) the lint findings and agent-config issues the session introduced. Each blocks stopping **once**. |
-| **PreToolUse** (`Bash`) | Asks for confirmation before commands that skip Git hooks (`git commit --no-verify`, `HUSKY=0 git …`). |
+| **PreToolUse** (`Bash`) | Asks for confirmation before commands that skip Git hooks (`git commit --no-verify`, `HUSKY=0 git …`). With `--check-installs`, also checks the npm packages an install command would fetch. |
 
 ## Quick Setup
 
@@ -112,6 +112,21 @@ Inline directives use the `require-reason` policy in the hook. `// eslint-disabl
 
 The per-edit integrity check covers the edited file: new suppressions, skipped or focused tests, removed tests (advisory per file, because moves to other files can only be judged at Stop), and downgraded settings when the edited file is a config file (`tsconfig.json`, ESLint/Jest/Vitest config, `package.json`, a workflow, a husky hook).
 
+## Package check before install
+
+Off by default, because it uses the network. Turn it on with `npx ai-guard init-claude --check-installs` (it also updates an existing setup), with the plugin option **Check packages before install**, or with `AI_GUARD_CHECK_INSTALLS=1`.
+
+Before Claude runs `npm install`, `pnpm add`, `yarn add`, `bun add`, `npx`, `pnpm dlx`, `npm create` and similar commands (Bash or PowerShell), AI Guard looks up each package on the npm registry:
+
+| Result | What happens |
+|---|---|
+| The package or version doesn't exist, or npm replaced it with a security placeholder | **Denied.** Claude sees why ("does not exist on npm … Did you mean `express`?") and fixes the name. Nothing is installed. |
+| A look-alike of a popular package, or an install script, on a new or rarely used package | **You are asked** to confirm, and Claude is told why. |
+| A single warning (deprecated, new, rarely used) | The command runs; Claude gets a note. |
+| Clean, private-registry packages, `npx` for a locally installed tool, no network | Nothing; the command runs. |
+
+The checks are the same as [`verify-deps`](../cli/verify-deps.md). The hook gives up after 10 seconds and lets the command run.
+
 ## Commands
 
 ### `ai-guard init-claude`
@@ -122,6 +137,7 @@ npx ai-guard init-claude --dry-run        # preview
 npx ai-guard init-claude --local          # .claude/settings.local.json
 npx ai-guard init-claude --no-stop-hook   # skip SessionStart + Stop (and the introduced-issues check)
 npx ai-guard init-claude --no-bash-guard  # skip the PreToolUse Bash guard
+npx ai-guard init-claude --check-installs # check packages before installs (uses the npm registry)
 ```
 
 - Preserves existing settings and hooks, and is idempotent.

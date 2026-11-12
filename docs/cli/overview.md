@@ -33,6 +33,7 @@ ai-guard run
 | `changed` | Scan only changed files (`--integrity` adds check integrity) | Pull requests and CI |
 | [`integrity`](../integrity.md) | Detect changes that weaken checks vs a base revision | Before merging agent-written changes |
 | [`verify`](verify.md) | One verdict for the current change | Before calling work done or merging |
+| [`verify-deps`](verify-deps.md) | Check npm packages before they are installed | When a change adds dependencies |
 | [`scan-agent-config`](scan-agent-config.md) | Check agent instructions and MCP config | When adding or reviewing agent config |
 | `changed --test-integrity` ([details](test-integrity.md)) | Flag weakened tests in a change | In pull requests |
 

@@ -36,6 +36,8 @@ export interface MergeOptions {
   stopHook?: boolean;
   /** Register the PreToolUse Bash guard against `--no-verify` / `HUSKY=0`. Default true. */
   bashGuard?: boolean;
+  /** Check the npm packages in install commands before they run (network). Default false. */
+  checkInstalls?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -45,6 +47,9 @@ const AI_GUARD_HOOK_MATCHER = 'Edit|MultiEdit|Write';
 /** Matcher written by AI Guard ≤ 1.4.1; still recognized when merging. */
 const LEGACY_HOOK_MATCHER = 'Edit|Write';
 const BASH_MATCHER = 'Bash';
+/** New install-check hooks also cover Claude Code's PowerShell tool. */
+const COMMAND_MATCHER = 'Bash|PowerShell';
+const CHECK_INSTALLS_FLAG = '--check-installs';
 const SETTINGS_DIR = '.claude';
 const SETTINGS_FILE = 'settings.json';
 const SETTINGS_LOCAL_FILE = 'settings.local.json';
@@ -114,12 +119,13 @@ function addHook(
   event: HookEvent,
   matcher: string | undefined,
   alsoAccept: string[] = [],
+  command: string = AI_GUARD_HOOK_COMMAND,
 ): boolean {
   const list = Array.isArray(hooks[event]) ? hooks[event] as ClaudeHookMatcher[] : [];
   hooks[event] = list;
   // Already installed under any matcher: leave the user's configuration alone.
   if (list.some(matcherHasAiGuard)) return false;
-  const entry: ClaudeHookEntry = { type: 'command', command: AI_GUARD_HOOK_COMMAND };
+  const entry: ClaudeHookEntry = { type: 'command', command };
   const target = list.find((m) => (matcher === undefined ? m.matcher === undefined : m.matcher === matcher || alsoAccept.includes(m.matcher ?? '')));
   if (target) {
     if (!Array.isArray(target.hooks)) target.hooks = [];
@@ -153,8 +159,27 @@ export function mergeAiGuardHook(
     if (addHook(hooks, 'SessionStart', undefined)) added.push('SessionStart');
     if (addHook(hooks, 'Stop', undefined)) added.push('Stop');
   }
-  if (options.bashGuard !== false && addHook(hooks, 'PreToolUse', BASH_MATCHER)) added.push('PreToolUse');
+  if (options.bashGuard !== false || options.checkInstalls === true) {
+    const flags = `${options.bashGuard === false ? ' --bash-guard off' : ''}${options.checkInstalls ? ` ${CHECK_INSTALLS_FLAG}` : ''}`;
+    const matcher = options.checkInstalls ? COMMAND_MATCHER : BASH_MATCHER;
+    if (addHook(hooks, 'PreToolUse', matcher, [BASH_MATCHER, COMMAND_MATCHER], AI_GUARD_HOOK_COMMAND + flags)) added.push('PreToolUse');
+    else if (options.checkInstalls && enableInstallCheck(hooks)) added.push('PreToolUse');
+  }
   return { settings: result, changed: added.length > 0, added };
+}
+
+/** Turn on the install check in an AI Guard PreToolUse hook that is already configured. */
+function enableInstallCheck(hooks: NonNullable<ClaudeSettings['hooks']>): boolean {
+  let changed = false;
+  for (const matcher of (hooks.PreToolUse ?? []) as ClaudeHookMatcher[]) {
+    for (const hook of Array.isArray(matcher.hooks) ? matcher.hooks : []) {
+      if (isAiGuardHook(hook) && !hook.command.includes(CHECK_INSTALLS_FLAG)) {
+        hook.command = `${hook.command} ${CHECK_INSTALLS_FLAG}`;
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 // ─── Command registration ─────────────────────────────────────────────────────
@@ -167,7 +192,8 @@ export function registerInitClaudeCommand(program: Command): void {
     .option('--local', 'Write to .claude/settings.local.json instead of settings.json')
     .option('--no-stop-hook', 'Do not register the SessionStart/Stop check-integrity hooks')
     .option('--no-bash-guard', 'Do not register the PreToolUse guard for `git commit --no-verify` / `HUSKY=0`')
-    .action((opts: { dryRun?: boolean; local?: boolean; stopHook?: boolean; bashGuard?: boolean }) => {
+    .option('--check-installs', 'Also check the npm packages in install commands (npm, pnpm, yarn, bun, npx) against the npm registry before they run')
+    .action((opts: { dryRun?: boolean; local?: boolean; stopHook?: boolean; bashGuard?: boolean; checkInstalls?: boolean }) => {
       const cwd = process.cwd();
       const isDryRun = opts.dryRun === true;
       const useLocal = opts.local === true;
@@ -233,6 +259,7 @@ export function registerInitClaudeCommand(program: Command): void {
       const { settings: merged, changed, added } = mergeAiGuardHook(existingSettings, {
         stopHook: opts.stopHook !== false,
         bashGuard: opts.bashGuard !== false,
+        checkInstalls: opts.checkInstalls === true,
       });
 
       if (!changed) {
@@ -277,6 +304,7 @@ export function registerInitClaudeCommand(program: Command): void {
       log.info('PostToolUse: after Claude edits a file, findings and weakened checks are sent back to Claude.');
       if (opts.stopHook !== false) log.info('Stop: before Claude finishes, newly weakened checks (skips, suppressions, config downgrades) and problems the session introduced (placeholder code, agent-config issues) block once.');
       if (opts.bashGuard !== false) log.info('PreToolUse: commands that skip Git hooks (--no-verify, HUSKY=0) ask for confirmation.');
+      if (opts.checkInstalls === true) log.info('PreToolUse: packages in install commands are checked on the npm registry first. Missing names are blocked; suspicious packages ask you.');
       log.blank();
       log.print(`  ${chalk.gray('Rules on every edit (agent preset):')}`);
       for (const rule of Object.keys(AGENT_RULES)) {

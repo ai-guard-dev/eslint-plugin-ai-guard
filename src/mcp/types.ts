@@ -9,6 +9,7 @@ import type { IssueDetail } from '../../cli/utils/eslint-runner.js';
 import type { TestIntegrityFinding } from '../../cli/utils/test-integrity.js';
 import type { VerifyFinding } from '../../cli/utils/verify.js';
 import type { AgentConfigFinding, McpServerInfo } from '../../cli/utils/agent-config.js';
+import type { DepFinding, PackageFacts, Verdict } from '../../cli/utils/deps/assess.js';
 
 // ─── MCP Issue (subset of IssueDetail for MCP transport) ──────────────────────
 
@@ -83,6 +84,27 @@ export interface VerifyChangeResult {
   /** Findings in touched files that this change did not introduce. */
   preExisting: number;
   truncated: boolean;
+  errors: ToolError[];
+}
+
+export interface CheckedPackage {
+  /** The argument as given. */
+  input: string;
+  name: string;
+  spec: string | null;
+  verdict: Verdict;
+  reason?: string;
+  findings: DepFinding[];
+  facts?: PackageFacts;
+  similarTo?: string;
+}
+
+export interface CheckPackageResult {
+  success: boolean;
+  status: 'complete' | 'partial' | 'failed';
+  /** True only when every package was checked and none is blocked. */
+  safeToInstall: boolean;
+  packages: CheckedPackage[];
   errors: ToolError[];
 }
 

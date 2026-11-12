@@ -38,7 +38,7 @@ describe('MCP structured output', () => {
 
   it('declares output schemas for every tool, and read-only annotations for all but fix', async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(8);
+    expect(tools).toHaveLength(9);
     for (const tool of tools) {
       expect(tool.outputSchema?.type).toBe('object');
       // ai_guard_fix writes when apply=true, so it must not claim to be read-only.

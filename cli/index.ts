@@ -15,6 +15,7 @@ import { registerClaudeHookCommand } from './commands/claude-hook.js';
 import { registerIntegrityCommand } from './commands/integrity.js';
 import { registerScanAgentConfigCommand } from './commands/scan-agent-config.js';
 import { registerVerifyCommand } from './commands/verify.js';
+import { registerVerifyDepsCommand } from './commands/verify-deps.js';
 import { log } from './utils/logger.js';
 
 // ─── Version resolution ───────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ registerInitClaudeCommand(program);
 registerClaudeHookCommand(program);
 registerScanAgentConfigCommand(program);
 registerVerifyCommand(program);
+registerVerifyDepsCommand(program);
 
 // ─── Global error handling ────────────────────────────────────────────────────
 

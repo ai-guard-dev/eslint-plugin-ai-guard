@@ -19,9 +19,12 @@
  *    findings stop Claude once per unique finding (`decision: "block"`); after
  *    that, or for advisories, the user is informed with `systemMessage` so
  *    Claude is never trapped in a loop.
- *  PreToolUse (Bash)
+ *  PreToolUse (Bash, PowerShell)
  *    Asks for confirmation before commands that skip Git hooks
- *    (`git commit --no-verify`, `HUSKY=0 …`).
+ *    (`git commit --no-verify`, `HUSKY=0 …`). With --check-installs (or
+ *    AI_GUARD_CHECK_INSTALLS=1, or the plugin's check_installs option) it also
+ *    checks the npm packages an install command would fetch: missing names are
+ *    denied, suspicious packages ask the user, warnings go to Claude as context.
  *  SessionStart
  *    Snapshots the working tree as the session's integrity base, so changes
  *    the user had already made before the session are not attributed to the
@@ -41,6 +44,7 @@ import { IntegrityGitError, baseFromCommit, headCommit, repoRootOf, resolveBase,
 import { blankQuotes, detectHookBypass, describeWeakener } from '../utils/integrity/commands.js';
 import { formatFindingsForAgent } from '../utils/integrity/report.js';
 import { verifyChange, type VerifyFinding, type VerifyReport } from '../utils/verify.js';
+import { guardInstallCommand, type InstallGuardOptions } from '../utils/deps/install-guard.js';
 import type { IntegrityFinding, IntegrityReport } from '../utils/integrity/types.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -77,6 +81,17 @@ export interface HookOptions {
   lint?: (file: string) => Promise<RunResult>;
   /** Change verification (injectable for tests). */
   verify?: typeof verifyChange;
+  /** Check the npm packages in install commands before they run (network; opt-in). */
+  checkInstalls?: boolean;
+  /** Registry client and timeouts for the install check (injectable for tests). */
+  installGuard?: InstallGuardOptions;
+}
+
+/** The install check is opt-in: --check-installs, AI_GUARD_CHECK_INSTALLS, or the plugin option check_installs. */
+export function installCheckEnabled(flag: boolean | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (flag) return true;
+  const truthy = (v: string | undefined): boolean => v !== undefined && /^(?:1|true|yes|on)$/i.test(v.trim());
+  return truthy(env.AI_GUARD_CHECK_INSTALLS) || truthy(env.CLAUDE_PLUGIN_OPTION_CHECK_INSTALLS);
 }
 
 interface SessionState {
@@ -505,23 +520,44 @@ export function isAcceptCommand(command: string): boolean {
   return /\bai-guard\b[^\n;&|]*\bintegrity\b[^\n;&|]*--accept\b/.test(blankQuotes(command));
 }
 
-function onPreToolUseBash(input: HookInput, opts: HookOptions): HookOutput | null {
-  if (opts.bashGuard === 'off') return null;
-  const command = input.tool_input?.command;
-  if (typeof command !== 'string') return null;
+/** Commands that skip Git hooks or accept integrity findings. */
+function bypassGuard(command: string, mode: BashGuardMode): { decision: 'ask' | 'deny'; reason: string } | null {
+  if (mode === 'off') return null;
   const hits = detectHookBypass(command);
   const accepting = isAcceptCommand(command);
   if (hits.length === 0 && !accepting) return null;
   const reasons: string[] = [];
   if (hits.length > 0) reasons.push(`this command bypasses Git hooks (${hits.map(describeWeakener).join('; ')}). Run the hooks and fix what they report instead`);
   if (accepting) reasons.push('this command accepts check-integrity findings, which hides them from enforcement. Only the user should accept a weakened check');
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: opts.bashGuard,
-      permissionDecisionReason: `AI Guard: ${reasons.join('; ')}.`,
-    },
-  };
+  return { decision: mode, reason: `AI Guard: ${reasons.join('; ')}.` };
+}
+
+async function onPreToolUseCommand(input: HookInput, cwd: string, opts: HookOptions): Promise<HookOutput | null> {
+  const command = input.tool_input?.command;
+  if (typeof command !== 'string') return null;
+  const guard = input.tool_name === 'Bash' ? bypassGuard(command, opts.bashGuard) : null;
+  let install: Awaited<ReturnType<typeof guardInstallCommand>> = null;
+  if (installCheckEnabled(opts.checkInstalls)) {
+    try {
+      install = await guardInstallCommand(command, cwd, opts.installGuard);
+    } catch (err) {
+      // An install check that fails must never block the command.
+      if (process.env.AI_GUARD_DEBUG === '1') process.stderr.write(`[ai-guard] install check: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
+  if (!guard && !install) return null;
+
+  // Precedence matches Claude Code's: deny > ask > no decision.
+  const decisions = [guard?.decision, install?.decision].filter((d): d is 'ask' | 'deny' => d === 'ask' || d === 'deny');
+  const decision = decisions.includes('deny') ? 'deny' : decisions.includes('ask') ? 'ask' : undefined;
+  const reasons = [guard?.reason, install?.decision ? install.reason : null].filter((r): r is string => Boolean(r));
+  const output: Record<string, unknown> = { hookEventName: 'PreToolUse' };
+  if (decision) {
+    output.permissionDecision = decision;
+    output.permissionDecisionReason = reasons.join('\n\n');
+  }
+  if (install?.context) output.additionalContext = install.context;
+  return Object.keys(output).length > 1 ? { hookSpecificOutput: output } : null;
 }
 
 /**
@@ -534,7 +570,7 @@ export function handleHookInput(input: HookInput, opts: HookOptions): Promise<Ho
   switch (event) {
     case 'PostToolUse': return onPostToolUse(input, cwd, opts);
     case 'Stop': return onStop(input, cwd, opts);
-    case 'PreToolUse': return Promise.resolve(input.tool_name === 'Bash' ? onPreToolUseBash(input, opts) : null);
+    case 'PreToolUse': return input.tool_name === 'Bash' || input.tool_name === 'PowerShell' ? onPreToolUseCommand(input, cwd, opts) : Promise.resolve(null);
     case 'SessionStart':
       // Plain stdout on SessionStart is added to Claude's context, so print nothing.
       try { openSession(input, cwd, opts, true); } catch { /* not a Git repository */ }
@@ -553,7 +589,8 @@ export function registerClaudeHookCommand(program: Command): void {
     .option('--base <ref>', 'Compare integrity with merge-base(HEAD, <ref>) instead of the session start')
     .option('--bash-guard <mode>', 'Commands that skip Git hooks: ask (default) | deny | off', 'ask')
     .option('--isolated', 'Use the rules bundled with this CLI, for projects without AI Guard installed (Claude Code plugin)')
-    .action(async (opts: { file?: string; base?: string; bashGuard: string; isolated?: boolean }) => {
+    .option('--check-installs', 'PreToolUse: check the npm packages in install commands against the npm registry before they run')
+    .action(async (opts: { file?: string; base?: string; bashGuard: string; isolated?: boolean; checkInstalls?: boolean }) => {
       const cwd = process.cwd();
 
       if (opts.file) {
@@ -586,6 +623,7 @@ export function registerClaudeHookCommand(program: Command): void {
           base: opts.base,
           bashGuard,
           isolated: opts.isolated,
+          checkInstalls: opts.checkInstalls,
         });
         if (output) process.stdout.write(JSON.stringify(output) + '\n');
       } catch (err) {

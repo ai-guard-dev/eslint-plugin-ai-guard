@@ -10,6 +10,7 @@ The analysis runs on your machine using the open-source [`eslint-plugin-ai-guard
 
 - **MCP server** `ai-guard`: the `ai-guard-mcp` server from `eslint-plugin-ai-guard@1.4.4`, started with Node over local STDIO for the current project. Its dependencies are pinned in this plugin's `package-lock.json` (`eslint-plugin-ai-guard@1.4.4`, `eslint@9.39.5`, `@typescript-eslint/parser@8.72.0`).
 - **Hooks**: findings reach Claude after each JS/TS edit, and the whole change is verified when Claude finishes. New blocking issues and weakened tests go back to Claude once; anything still open is shown to you as a one-line warning. Because plugin hooks run with the bundled rules in isolated mode, inline `eslint-disable` comments are not honored there, so an agent cannot silence a finding by adding one.
+- **Package check before install** (off by default): turn on the plugin option **Check packages before install** to have AI Guard look up each package on the npm registry before Claude runs `npm install`, `pnpm add`, `yarn add`, `bun add` or `npx`. Names that don't exist are blocked; look-alikes of popular packages ask you first. Package names are sent to `registry.npmjs.org`; private-registry packages are skipped. Other commands return immediately without starting AI Guard.
 - **Skill** `/ai-guard:verify-changes [file-or-directory] [preset]`: the scan → fix → rescan workflow. Claude can also invoke it on its own after editing JS/TS code.
 
 | Tool | Use |
@@ -21,6 +22,7 @@ The analysis runs on your machine using the open-source [`eslint-plugin-ai-guard
 | `ai_guard_verify_change` | One verdict for the change: introduced findings, weakened tests, agent-config issues |
 | `ai_guard_scan_agent_config` | Check CLAUDE.md, AGENTS.md, skills and MCP config for hidden text and prompt injection |
 | `ai_guard_fix` | Apply deterministic autofixes to one file; returns a diff, and writes only with `apply: true` |
+| `ai_guard_check_package` | Check npm packages before installing them: missing names, look-alikes, new or rarely used packages, install scripts (uses the npm registry) |
 
 Presets: `agent` (default, 8 high-confidence rules), `recommended`, `strict`, `security`.
 

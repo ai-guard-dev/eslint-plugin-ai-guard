@@ -7,6 +7,7 @@
  *
  *   ai-guard/agent-config/<check>
  *   ai-guard/test-integrity/<check>
+ *   ai-guard/deps/<check>
  *
  * Severity maps to confidence: `error` checks are `high` (fail CI by default,
  * like other high-confidence findings); `warning` checks are `medium`.
@@ -88,6 +89,31 @@ export const TEST_INTEGRITY_CHECKS: Record<TestIntegrityCheck, CheckInfo> = {
   'test-config-changed': { severity: 'warning', title: 'Test configuration now excludes or relaxes tests', remediation: 'Confirm the new exclusions or thresholds are intended and do not hide failing tests.' },
 };
 
+export type DependencyCheck =
+  | 'package-not-found'
+  | 'version-not-found'
+  | 'security-holding'
+  | 'typosquat-suspect'
+  | 'install-script-unknown'
+  | 'lookalike-name'
+  | 'new-package'
+  | 'low-downloads'
+  | 'install-script'
+  | 'deprecated';
+
+export const DEPENDENCY_CHECKS: Record<DependencyCheck, CheckInfo> = {
+  'package-not-found': { severity: 'error', title: 'Package does not exist on npm', remediation: 'Check the package name; AI assistants often invent names that anyone could register later.' },
+  'version-not-found': { severity: 'error', title: 'Package version does not exist', remediation: 'Use a version that is published on npm.' },
+  'security-holding': { severity: 'error', title: 'npm removed this package and left a placeholder', remediation: 'Use the package you meant; this name was used for malware.' },
+  'typosquat-suspect': { severity: 'error', title: 'Looks like a popular package, but is new or rarely used', remediation: 'Use the popular package the name imitates, unless you are sure this is the one you want.' },
+  'install-script-unknown': { severity: 'error', title: 'New or rarely used package that runs code on install', remediation: 'Review the package and its install script before installing it.' },
+  'lookalike-name': { severity: 'warning', title: 'Name resembles a popular package', remediation: 'Make sure this is the package you meant.' },
+  'new-package': { severity: 'warning', title: 'Package was first published recently', remediation: 'Check who publishes it and whether it is the package you meant.' },
+  'low-downloads': { severity: 'warning', title: 'Package is rarely downloaded', remediation: 'Check that it is maintained and is the package you meant.' },
+  'install-script': { severity: 'warning', title: 'Package runs code on install', remediation: 'Install scripts run with your permissions; make sure you trust the package.' },
+  'deprecated': { severity: 'warning', title: 'Package version is deprecated', remediation: 'Follow the deprecation message, usually to a maintained replacement.' },
+};
+
 export interface VirtualRuleMeta {
   confidence: 'high' | 'medium';
   category: string;
@@ -119,6 +145,16 @@ export function virtualRules(): Record<string, VirtualRuleMeta> {
       shortDesc: info.title,
       tags: ['ai-patterns', 'testing', 'test-integrity'],
       docs: `cli/test-integrity.md#${check}`,
+    };
+  }
+  for (const [check, info] of Object.entries(DEPENDENCY_CHECKS)) {
+    out[`ai-guard/deps/${check}`] = {
+      confidence: info.severity === 'error' ? 'high' : 'medium',
+      category: 'Security',
+      remediation: info.remediation,
+      shortDesc: info.title,
+      tags: ['security', 'supply-chain', 'dependencies'],
+      docs: `cli/verify-deps.md#${check}`,
     };
   }
   return out;

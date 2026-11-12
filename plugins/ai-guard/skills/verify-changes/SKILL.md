@@ -9,6 +9,7 @@ allowed-tools:
   - mcp__plugin_ai-guard_ai-guard__ai_guard_rules
   - mcp__plugin_ai-guard_ai-guard__ai_guard_verify_change
   - mcp__plugin_ai-guard_ai-guard__ai_guard_fix
+  - mcp__plugin_ai-guard_ai-guard__ai_guard_check_package
 ---
 
 # Verify changes with AI Guard
@@ -52,6 +53,8 @@ For every issue: open `file` at `line`, read the surrounding code, and fix the r
 Rescan with the same arguments. Repeat steps 2–4 at most 3 times. If findings remain after that, stop and report them.
 
 For findings marked `fixable: true`, `ai_guard_fix` with `{"path": "<file>"}` shows the deterministic fix as a diff, and `"apply": true` writes it.
+
+If the change adds an npm dependency, call `ai_guard_check_package` with `{"packages": ["<name>"]}` before installing it. Do not install a package with verdict `block`; use the package named in `similarTo`, or ask the user.
 
 ## 5. Verify the whole change
 

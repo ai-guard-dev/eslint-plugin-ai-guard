@@ -9,6 +9,7 @@ import { checkIntegrity, DEFAULT_MAX_FINDINGS, MAX_FINDINGS_LIMIT } from './tool
 import { verifyChangeTool } from './tools/verify-change.js';
 import { scanAgentConfigTool } from './tools/scan-agent-config.js';
 import { fixFile } from './tools/fix.js';
+import { checkPackageTool, MAX_PACKAGES } from './tools/check-package.js';
 import { DEFAULT_MAX_ISSUES, MAX_ISSUES_LIMIT, failure } from './utils/scan.js';
 
 // ─── Output schemas (structuredContent is validated against these) ───────────
@@ -195,12 +196,41 @@ const rulesOutput = {
   unknownRules: z.array(z.string()).optional(),
 };
 
+const checkPackageOutput = {
+  success: z.boolean(),
+  status: z.enum(['complete', 'partial', 'failed']),
+  safeToInstall: z.boolean(),
+  packages: z.array(z.object({
+    input: z.string(),
+    name: z.string(),
+    spec: z.string().nullable(),
+    verdict: z.enum(['ok', 'warning', 'block', 'skipped', 'unchecked']),
+    reason: z.string().optional(),
+    findings: z.array(z.object({
+      check: z.string(),
+      severity: z.enum(['error', 'warning']),
+      message: z.string(),
+    })),
+    facts: z.object({
+      popular: z.boolean(),
+      version: z.string().nullable(),
+      createdAt: z.string().nullable(),
+      ageDays: z.number().nullable(),
+      weeklyDownloads: z.number().nullable(),
+      installScripts: z.array(z.string()),
+      deprecated: z.string().nullable(),
+    }).optional(),
+    similarTo: z.string().optional(),
+  })),
+  errors: z.array(z.object({ code: z.string(), message: z.string() })),
+};
+
 const readOnly = { readOnlyHint: true, openWorldHint: false };
 
 export function createMcpServer(root: string): McpServer {
   const workspace = canonicalWorkspace(root);
   const server = new McpServer({ name: 'ai-guard', version: '1.4.4' }, {
-    instructions: 'Before calling work done, run verify_change: pass=true means no blocking issues; tell the user about every item in disclosures. Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, check_integrity to find checks your change weakened (new suppressions, skipped or removed tests, downgraded configs, removed CI steps), scan_agent_config for CLAUDE.md/AGENTS.md/MCP config, fix for deterministic autofixes (a diff unless apply=true), and rules to inspect presets or look up a rule. Inline eslint-disable comments never hide findings here.',
+    instructions: 'Before calling work done, run verify_change: pass=true means no blocking issues; tell the user about every item in disclosures. Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, check_integrity to find checks your change weakened (new suppressions, skipped or removed tests, downgraded configs, removed CI steps), scan_agent_config for CLAUDE.md/AGENTS.md/MCP config, check_package before adding an npm dependency or running npx with a new package, fix for deterministic autofixes (a diff unless apply=true), and rules to inspect presets or look up a rule. Inline eslint-disable comments never hide findings here.',
   });
   const preset = z.enum(['recommended', 'strict', 'security', 'agent']);
   const maxIssues = z.number().int().min(1).max(MAX_ISSUES_LIMIT).default(DEFAULT_MAX_ISSUES)
@@ -297,6 +327,16 @@ export function createMcpServer(root: string): McpServer {
     outputSchema: fixOutput,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, args => invoke(() => fixFile(args, workspace)));
+  server.registerTool('ai_guard_check_package', {
+    description: 'Check npm packages before installing or running them (npm install, npx). Reports names that do not exist (often invented by assistants), look-alikes of popular packages, new or rarely downloaded packages, install scripts, deprecations and npm security placeholders. verdict "block" means do not install; use the package named in similarTo or check the name. Contacts registry.npmjs.org and api.npmjs.org; packages from a private registry are skipped. Installs nothing.',
+    inputSchema: {
+      packages: z.array(z.string().min(1).max(256)).min(1).max(MAX_PACKAGES).describe('Package names, optionally with a version or dist-tag: "lodash", "react@18.3.1", "@types/node"'),
+      minAgeDays: z.number().int().min(0).max(3650).optional().describe('Packages first published fewer days ago count as new (default 30)'),
+      minWeeklyDownloads: z.number().int().min(0).optional().describe('Fewer weekly downloads count as rarely used (default 100)'),
+    },
+    outputSchema: checkPackageOutput,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, args => invoke(() => checkPackageTool(args, workspace)));
 
   server.registerPrompt('verify_changes', {
     title: 'AI Guard: scan → fix → rescan',

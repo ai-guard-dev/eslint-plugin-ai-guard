@@ -90,6 +90,7 @@ All scan tools accept `preset`: `agent` (default), `recommended`, `strict`, or `
 | `ai_guard_verify_change` | One verdict before calling work done: introduced lint findings, weakened tests, agent-config issues | `{}` or `{"base":"main"}` |
 | `ai_guard_scan_agent_config` | Check CLAUDE.md, AGENTS.md, skills and MCP config before trusting them | `{"path":"."}` |
 | `ai_guard_fix` | Apply deterministic autofixes to one file; returns a diff, and writes only with `apply` | `{"path":"src/api.ts","apply":false}` |
+| `ai_guard_check_package` | Check npm packages before installing them: missing names, look-alikes of popular packages, new or rarely used packages, install scripts, deprecations | `{"packages":["lodash","react@18.3.1"]}` |
 
 ### Inline directives
 
@@ -122,6 +123,8 @@ MCP scans never let `eslint-disable` comments hide findings (the `ignore` inline
 `ai_guard_verify_change` returns `pass`, `blocking`, `disclosures` and a ready-to-act-on `summary`. `pass: false` means fix `blocking` first; every item in `disclosures` should be reported to the user. A change that could not be fully analyzed is never `pass: true`. Only `ai_guard_fix` with `apply: true` writes to disk; the write is atomic and refused if the file changed in the meantime.
 
 `ai_guard_scan_diff` also returns `testIntegrity` (set `testIntegrity: false` to skip it). A focused test makes the diff not clean.
+
+`ai_guard_check_package` is the only tool that uses the network: it looks packages up on `registry.npmjs.org` and `api.npmjs.org` (packages served by a private registry are skipped). Each package gets a `verdict`: `block` means do not install it (`similarTo` names the popular package it imitates), `warning` means mention it, `skipped` and `unchecked` mean it was not checked. `safeToInstall` is true only when every package was checked and none is blocked. See [verify-deps](cli/verify-deps.md) for what each check means.
 
 ### Diff semantics
 

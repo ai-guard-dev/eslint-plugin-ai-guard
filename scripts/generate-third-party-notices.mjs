@@ -51,7 +51,23 @@ const out = [
   'bundled at build time. Their license texts are reproduced below.',
   '',
   ...entries.flatMap((e) => [`## ${e.name}@${e.version} (${e.license})`, '', '```text', e.text, '```', '']),
+  ...bundledData(),
 ].join('\n');
+
+/** Data files shipped in dist/ that come from other projects (not npm dependencies). */
+function bundledData() {
+  const source = fs.readFileSync(path.join(root, 'cli', 'data', 'popular-packages.ts'), 'utf8');
+  const header = source.slice(source.indexOf('/*!'), source.indexOf('*/'));
+  const from = /from (npm-high-impact@[^\s]+)/.exec(header)?.[1] ?? 'npm-high-impact';
+  const license = header.slice(header.indexOf('(The MIT License)')).split('\n').map((l) => l.replace(/^ \* ?/, '')).join('\n').trim();
+  return [
+    `## ${from} — list of popular npm packages (MIT)`,
+    '',
+    'The package-check commands include a list of the most-downloaded npm packages, taken from npm-high-impact (https://github.com/wooorm/npm-high-impact).',
+    '',
+    '```text', license, '```', '',
+  ];
+}
 
 fs.writeFileSync(path.join(root, 'THIRD-PARTY-NOTICES.md'), out);
 console.log(`Wrote THIRD-PARTY-NOTICES.md (${entries.length} packages: ${entries.map((e) => e.name).join(', ')})`);

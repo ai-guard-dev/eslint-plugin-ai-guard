@@ -22,5 +22,13 @@
   ],
   "icon": "./icon.png",
   "documentationUrl": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/mcp-server.md",
-  "supportUrl": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard/issues"
+  "supportUrl": "https://github.com/ai-guard-dev/eslint-plugin-ai-guard/issues",
+  "userConfig": {
+    "check_installs": {
+      "type": "boolean",
+      "title": "Check packages before install",
+      "description": "Before Claude runs npm, pnpm, yarn, bun or npx, look up each package on the npm registry. Blocks names that do not exist and asks you about look-alikes of popular packages. Sends package names to registry.npmjs.org; private-registry packages are skipped.",
+      "default": false
+    }
+  }
 }

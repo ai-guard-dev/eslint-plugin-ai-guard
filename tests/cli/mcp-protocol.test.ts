@@ -39,7 +39,7 @@ describe('MCP protocol', () => {
   }
   it('discovers all tools with required paths, preset enums, and bounded project schema', async () => {
     const { tools } = await client.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(['ai_guard_check_integrity', 'ai_guard_fix', 'ai_guard_rules', 'ai_guard_scan_agent_config', 'ai_guard_scan_diff', 'ai_guard_scan_file', 'ai_guard_scan_project', 'ai_guard_verify_change']);
+    expect(tools.map(t => t.name).sort()).toEqual(['ai_guard_check_integrity', 'ai_guard_check_package', 'ai_guard_fix', 'ai_guard_rules', 'ai_guard_scan_agent_config', 'ai_guard_scan_diff', 'ai_guard_scan_file', 'ai_guard_scan_project', 'ai_guard_verify_change']);
     expect(tools.find(t => t.name === 'ai_guard_scan_file')?.inputSchema.required).toContain('path');
     const project = tools.find(t => t.name === 'ai_guard_scan_project')!;
     expect(project.inputSchema.properties?.maxFiles).toMatchObject({ minimum: 1, maximum: 500 });
@@ -176,7 +176,7 @@ describe('MCP protocol', () => {
     const stdioClient = new Client({ name: 'smoke', version: '1.0.0' });
     try {
       await stdioClient.connect(transport);
-      expect((await stdioClient.listTools()).tools).toHaveLength(8);
+      expect((await stdioClient.listTools()).tools).toHaveLength(9);
       const response = await stdioClient.callTool({ name: 'ai_guard_scan_file', arguments: { path: 'bad.js' } });
       expect(response.structuredContent).toMatchObject({ success: true, clean: false, filesScanned: 1 });
       expect(diagnostics).toContain('Server started');
