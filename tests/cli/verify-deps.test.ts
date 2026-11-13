@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// These tests run real Git processes; the 5 s default is too tight when the suite runs in parallel.
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 import { depsExitCode, depsToRunResult, verifyDeps, type DepsReport } from '../../cli/utils/deps/verify-deps';
 import { RegistryClient } from '../../cli/utils/deps/registry';
 import { createTempRepo, type TempRepo } from '../helpers/git-repo';

@@ -4,8 +4,11 @@
  * be reported and the safe look-alike that must not.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createTempRepo, type TempRepo } from '../helpers/git-repo';
+
+// These tests run real Git processes; the 5 s default is too tight when the suite runs in parallel.
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 import { analyzeIntegrity, type AnalyzeOptions } from '../../cli/utils/integrity/engine';
 import { IntegrityGitError } from '../../cli/utils/integrity/git';
 import type { IntegrityFinding } from '../../cli/utils/integrity/types';

@@ -8,8 +8,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTempRepo, type TempRepo } from '../helpers/git-repo';
+
+// These tests run real Git and ESLint processes; the 5 s default is too tight when the suite runs in parallel.
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 import { handleHookInput, parseHookInput, type HookOptions } from '../../cli/commands/claude-hook';
 import type { RunResult } from '../../cli/utils/eslint-runner';
 

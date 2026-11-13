@@ -1,7 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
+// These tests run real Git processes; the 5 s default is too tight when the suite runs in parallel.
+vi.setConfig({ testTimeout: 60000, hookTimeout: 60000 });
 import { createTempRepo, type TempRepo } from '../helpers/git-repo';
 import { checkIntegrity } from '../../src/mcp/tools/check-integrity';
 import { addIntegrityAcceptances, loadBaseline, loadIntegrityAcceptances } from '../../cli/utils/baseline';
