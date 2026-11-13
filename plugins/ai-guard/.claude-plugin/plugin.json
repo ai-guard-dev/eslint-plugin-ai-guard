@@ -1,7 +1,7 @@
 {
   "name": "ai-guard",
   "displayName": "AI Guard",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "Deterministic static-analysis guardrails for AI-generated JavaScript and TypeScript. Scans your changes, a file, or a directory for floating promises, empty catch blocks, hardcoded secrets, SQL injection, unsafe eval and more, then guides Claude to fix and rescan. Verifies the whole change when Claude finishes, including weakened tests. Runs locally and edits files only when asked.",
   "author": {
     "name": "YashJadhav21",
@@ -27,7 +27,7 @@
     "check_installs": {
       "type": "boolean",
       "title": "Check packages before install",
-      "description": "Before Claude runs npm, pnpm, yarn, bun or npx, look up each package on the npm registry. Blocks names that do not exist and asks you about look-alikes of popular packages. Sends package names to registry.npmjs.org; private-registry packages are skipped.",
+      "description": "Before Claude runs npm, pnpm, yarn, bun or npx, look up each package on the npm registry. Blocks names that do not exist and asks you about look-alikes of popular packages and releases published in the last day. Sends package names to registry.npmjs.org; private-registry packages are skipped.",
       "default": false
     }
   }

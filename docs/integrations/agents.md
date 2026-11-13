@@ -70,5 +70,5 @@ Agents call hooks often; Codex calls `PreToolUse` before every shell command. Th
 
 1. In Cursor or Codex, ask the agent to run `git commit --no-verify -m test`. Cursor should ask you; Codex should refuse and tell the agent to ask you.
 2. Ask it to add a function whose body is `// TODO: implement` and `return true`, then finish. The agent should get one message about the placeholder and fix it.
-3. With `--check-installs`, ask it to run `npm install expresss`. It should be stopped with "Did you mean express?".
+3. With `--check-installs`, ask it to run `npm install ai-guard-demo-no-such-package`. A name that does not exist on npm is refused before it runs. (A look-alike that does exist, such as `expresss`, is only flagged when it is new or rarely downloaded; older ones get a warning passed to the agent.)
 4. Debug output: `AI_GUARD_DEBUG=1` prints hook errors to stderr.
