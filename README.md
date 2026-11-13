@@ -42,7 +42,17 @@
 - **Hooks for Claude Code, Cursor and Codex** (`ai-guard init-hooks`): findings go back to the agent as it works, and it is stopped once before finishing on weakened checks or problems it introduced
 - **A pre-commit gate** (`ai-guard init-git-hook`) that checks every commit, whichever agent or person wrote it
 - **Works with Oxlint** as a JS plugin, with identical results checked in CI (`ai-guard init-oxlint`)
+- **Package checks** (`ai-guard verify-deps`, an opt-in pre-install hook, and the `ai_guard_check_package` MCP tool): names that do not exist on npm, typosquats and npm security placeholders are blocked; install scripts, deprecations and releases from the last day are flagged
 - **MCP server** (`ai-guard-mcp`, 9 tools) for local AI-agent workflows over STDIO
+
+### Results on real projects
+
+Measured on 12 November 2026 with 1.4.6. Methods, raw numbers and the commands to reproduce them: [docs/evidence.md](./docs/evidence.md).
+
+- **0 of 1,361** real dependencies blocked (763 from 15 large open-source projects, 598 from 9 apps)
+- **34 of 36** names from the 2017 crossenv malware campaign blocked
+- **3.0%** of the 5,000 most-downloaded packages had a latest release under a day old, the window the fresh-release check covers
+- **27 of 27** rules give identical results in ESLint and Oxlint, checked in CI
 
 It is engineered to detect reliability bugs, async hazards, security vulnerabilities, and code-scaffolding defects frequently introduced during AI-assisted development (GitHub Copilot, Cursor, Claude Code, Gemini Code Assist, etc.).
 
@@ -142,7 +152,7 @@ AI Guard includes **27 deterministic rules** divided into four specialized categ
 
 | Rule | Recommended | What It Catches | Fixable? |
 | :--- | :---: | :--- | :---: |
-| [`no-empty-catch`](./docs/rules/no-empty-catch.md) | **`error`** | Empty `catch (e) {}` blocks that silently swallow exceptions without logging or rethrowing. | **Yes** (inserts `/* TODO: handle error */`) |
+| [`no-empty-catch`](./docs/rules/no-empty-catch.md) | **`error`** | Empty `catch (e) {}` blocks that silently swallow exceptions without logging or rethrowing. | No (editor suggestion: rethrow) |
 | [`no-broad-exception`](./docs/rules/no-broad-exception.md) | `warn` | Catching broad exception types like `catch (e: any)` that mask system faults and typing. | No |
 | [`no-catch-log-rethrow`](./docs/rules/no-catch-log-rethrow.md) | `off`* | Catch blocks that only log to `console` and rethrow without adding context or diagnostic info. | No |
 | [`no-catch-without-use`](./docs/rules/no-catch-without-use.md) | `off`* | Caught error variables that are declared in catch parameters but never referenced. | No |
@@ -152,7 +162,7 @@ AI Guard includes **27 deterministic rules** divided into four specialized categ
 
 | Rule | Recommended | What It Catches | Fixable? |
 | :--- | :---: | :--- | :---: |
-| [`no-floating-promise`](./docs/rules/no-floating-promise.md) | **`error`** | Async function invocations without `await`, `.catch()`, or `return` — leading to silent dropped errors. | **Yes** (marks with `void`) |
+| [`no-floating-promise`](./docs/rules/no-floating-promise.md) | **`error`** | Async function invocations without `await`, `.catch()`, or `return` — leading to silent dropped errors. | No (editor suggestions: `await`, or `void` if intended) |
 | [`no-async-array-callback`](./docs/rules/no-async-array-callback.md) | `warn` | Async callbacks passed to `map()`, `filter()`, `forEach()`, or `reduce()` returning `Promise[]`. | No |
 | [`no-await-in-loop`](./docs/rules/no-await-in-loop.md) | `warn` | Sequential `await` in loops where iterations can be safely executed concurrently with `Promise.all`. | **Yes** (rewrites to `Promise.all`) |
 | [`no-async-without-await`](./docs/rules/no-async-without-await.md) | `warn` | Functions declared `async` that never execute an `await` expression, adding unnecessary Promise overhead. | No |
@@ -621,9 +631,9 @@ npx eslint . --fix
 | Rule | Automatic Fix Behavior |
 | :--- | :--- |
 | `no-hardcoded-secret` | Replaces hardcoded string literal with `process.env.VARIABLE_NAME` |
-| `no-empty-catch` | Inserts `/* TODO: handle error */` comment to prevent silent swallowing |
-| `no-floating-promise` | Prepends `void ` expression to intentionally unawaited calls |
 | `no-await-in-loop` | Rewrites straightforward sequential loops to `await Promise.all(...)` |
+
+`no-empty-catch` and `no-floating-promise` have no automatic fix on purpose. A fix that inserted a comment or `void` would make the finding disappear without handling the error, and an agent running `--fix` would do exactly that. Editors offer them as suggestions instead (rethrow; `await`, or `void` for an intended fire-and-forget call), which a person applies one at a time.
 
 ---
 
@@ -723,7 +733,7 @@ npx --yes --package eslint-plugin-ai-guard ai-guard-mcp
 | :--- | :--- |
 | `ai_guard_scan_file` | Scan a single JS/TS file with structured findings |
 | `ai_guard_scan_diff` | Scan changed files in git diff (including newly created untracked JS/TS files) |
-| `ai_guard_scan_project` | Scan a bounded workspace directory (current source; not yet published) |
+| `ai_guard_scan_project` | Scan a bounded workspace directory (at most 500 files; fails instead of truncating) |
 | `ai_guard_rules` | List rules and presets, or look up specific rules (`rules: ["no-floating-promise"]`) with remediation and docs link |
 | `ai_guard_check_integrity` | Report checks weakened by current Git changes (new suppressions, skipped/removed tests, lowered configs, removed CI steps), with `tier` and `hasBlockingFindings` |
 

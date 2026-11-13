@@ -2,7 +2,7 @@
 
 AI Guard exposes its existing ESLint runner through a local STDIO MCP server. It does not edit files, execute agent-supplied commands, or send telemetry.
 
-This page describes the current source checkout, including changes not yet published to npm. Build this checkout to test the behavior below; installing an older published version does not provide the new project tool or status contract.
+Everything on this page is in the published package (1.4.6 and later).
 
 ## Setup
 

@@ -202,4 +202,4 @@ PR opened/updated
 All tests use Vitest. The shared `tests/helpers/rule-tester.ts` sets up `RuleTester` with
 vitest hooks — never re-declare it in individual test files.
 
-**Test counts:** 667 tests across 39 files (as of v1.2.7).
+**Test counts:** run `npm run test` for the current count (2,096 tests in 86 files at 1.4.6).

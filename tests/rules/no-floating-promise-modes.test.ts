@@ -111,35 +111,30 @@ const invalid = [
       async function doWork() { await fetch('/api') }
       doWork();
     `,
-    output: `
+    errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `
       async function doWork() { await fetch('/api') }
       void doWork();
-    `,
-    errors: [{ messageId: 'floatingPromise' }],
+    ` }] }],
   },
   // 2. Unhandled new Promise(...) expression statement
   {
     code: `new Promise((resolve) => resolve(1));`,
-    output: `void new Promise((resolve) => resolve(1));`,
-    errors: [{ messageId: 'floatingPromise' }],
+    errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void new Promise((resolve) => resolve(1));` }] }],
   },
   // 3. Unhandled fetch() call (known promise factory)
   {
     code: `fetch('/api');`,
-    output: `void fetch('/api');`,
-    errors: [{ messageId: 'floatingPromise' }],
+    errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void fetch('/api');` }] }],
   },
   // 4. Unhandled Promise.resolve() call
   {
     code: `Promise.resolve(1);`,
-    output: `void Promise.resolve(1);`,
-    errors: [{ messageId: 'floatingPromise' }],
+    errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void Promise.resolve(1);` }] }],
   },
   // 5. Unhandled Promise.all([...]) call
   {
     code: `Promise.all([1, 2]);`,
-    output: `void Promise.all([1, 2]);`,
-    errors: [{ messageId: 'floatingPromise' }],
+    errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void Promise.all([1, 2]);` }] }],
   },
 ];
 

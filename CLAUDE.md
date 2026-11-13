@@ -18,7 +18,7 @@ src/rules/          ESLint rule implementations (async/, reliability/, security/
 src/configs/        Preset rule configurations (recommended, strict, security)
 cli/commands/       CLI command handlers (run, changed, init, report, baseline, doctor)
 cli/utils/          Shared utilities (ESLint runner, SARIF generator, GitHub integration)
-tests/              Vitest test suite (667 tests across 39 files)
+tests/              Vitest test suite
 docs/               Documentation (rules/, guides/, github-actions.md, ai-agents.md)
 .github/workflows/  CI, release, and self-scan workflows
 ```
@@ -103,8 +103,7 @@ try { await fetchUser() } catch (e) {}
 
 // ✅
 try { await fetchUser() } catch (e) {
-  logger.error('fetchUser failed', e);
-  throw e;
+  throw new Error('fetchUser failed', { cause: e });
 }
 ```
 

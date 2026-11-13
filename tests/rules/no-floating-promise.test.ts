@@ -132,7 +132,15 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
           cb();
         }
       `,
-      output: `
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'addAwait', output: `
+        async function outer() {
+          await fetch('/api/data');
+          const cb = function() {
+            try { innerWork(); } catch (e) { console.log(e); }
+          };
+          cb();
+        }
+      ` }, { messageId: 'markVoid', output: `
         async function outer() {
           void fetch('/api/data');
           const cb = function() {
@@ -140,26 +148,46 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
           };
           cb();
         }
+      ` }] }],
+    },
+    // No automatic fix: --fix must not hide the finding. Inside an async arrow, both suggestions.
+    {
+      code: `const save = async (user) => { fetch('/api/users', { method: 'POST' }); };`,
+      errors: [{
+        messageId: 'floatingPromise',
+        suggestions: [
+          { messageId: 'addAwait', output: `const save = async (user) => { await fetch('/api/users', { method: 'POST' }); };` },
+          { messageId: 'markVoid', output: `const save = async (user) => { void fetch('/api/users', { method: 'POST' }); };` },
+        ],
+      }],
+    },
+    // A sync function nested in an async one: await is not valid there, so only void is offered.
+    {
+      code: `
+        async function run() {
+          items.forEach(function (item) { fetch('/api/' + item); });
+        }
       `,
-      errors: [{ messageId: 'floatingPromise' }],
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `
+        async function run() {
+          items.forEach(function (item) { void fetch('/api/' + item); });
+        }
+      ` }] }],
     },
     // 1. Bare fetch() call as statement
     {
       code: `fetch('/api/users');`,
-      output: `void fetch('/api/users');`,
-      errors: [{ messageId: 'floatingPromise' }],
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void fetch('/api/users');` }] }],
     },
     // 2. Bare Promise.resolve() call
     {
       code: `Promise.resolve(1);`,
-      output: `void Promise.resolve(1);`,
-      errors: [{ messageId: 'floatingPromise' }],
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void Promise.resolve(1);` }] }],
     },
     // 3. Bare Promise.all() call
     {
       code: `Promise.all(tasks);`,
-      output: `void Promise.all(tasks);`,
-      errors: [{ messageId: 'floatingPromise' }],
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void Promise.all(tasks);` }] }],
     },
     // 4. Known async function declared in same file
     {
@@ -167,11 +195,10 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
         async function doWork() { return 1; }
         doWork();
       `,
-      output: `
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `
         async function doWork() { return 1; }
         void doWork();
-      `,
-      errors: [{ messageId: 'floatingPromise' }],
+      ` }] }],
     },
     // 5. Async arrow function variable called bare
     {
@@ -179,23 +206,20 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
         const processItems = async () => { return 1; };
         processItems();
       `,
-      output: `
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `
         const processItems = async () => { return 1; };
         void processItems();
-      `,
-      errors: [{ messageId: 'floatingPromise' }],
+      ` }] }],
     },
     // 6. Async IIFE not awaited/handled
     {
       code: `(async () => 1)();`,
-      output: `void (async () => 1)();`,
-      errors: [{ messageId: 'floatingPromise' }],
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void (async () => 1)();` }] }],
     },
     // 7. New Promise without handling
     {
       code: `new Promise((resolve) => resolve(1));`,
-      output: `void new Promise((resolve) => resolve(1));`,
-      errors: [{ messageId: 'floatingPromise' }],
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `void new Promise((resolve) => resolve(1));` }] }],
     },
     // 8. Async function declared later should still be detected
     {
@@ -205,13 +229,12 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
           await fetch('/api');
         }
       `,
-      output: `
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `
         void loadData();
         async function loadData() {
           await fetch('/api');
         }
-      `,
-      errors: [{ messageId: 'floatingPromise' }],
+      ` }] }],
     },
     // 9. Async arrow assigned to variable and called bare
     {
@@ -221,13 +244,12 @@ ruleTester.run('no-floating-promise', noFloatingPromise, {
         };
         fetchDentistSlots();
       `,
-      output: `
+      errors: [{ messageId: 'floatingPromise', suggestions: [{ messageId: 'markVoid', output: `
         const fetchDentistSlots = async () => {
           await fetch('/api/slots');
         };
         void fetchDentistSlots();
-      `,
-      errors: [{ messageId: 'floatingPromise' }],
+      ` }] }],
     },
   ],
 });

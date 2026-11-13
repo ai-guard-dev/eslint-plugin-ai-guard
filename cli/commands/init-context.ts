@@ -69,7 +69,7 @@ function errorHandlingSection(): string {
   return `## Error Handling
 **Never** generate empty catch blocks:
   ❌  try { await fetchUser() } catch (e) {}
-  ✅  try { await fetchUser() } catch (e) { logger.error(e); throw e; }
+  ✅  try { await fetchUser() } catch (e) { throw new Error('fetchUser failed', { cause: e }); }
 
 **Never** catch (e: any) — use specific types or narrow with instanceof.
 
@@ -231,7 +231,7 @@ function cursorErrorHandling(): string {
 
 Rule: no-empty-catch
 Bad:  try { await fetchUser() } catch (e) {}
-Good: try { await fetchUser() } catch (e) { logger.error(e); throw e; }
+Good: try { await fetchUser() } catch (e) { throw new Error('fetchUser failed', { cause: e }); }
 
 Rule: no-broad-exception
 Bad:  catch (e: any) { handle(e); }
@@ -439,7 +439,7 @@ await Promise.all(ids.map((id) => fetchUser(id)));
 try { await fetchUser() } catch (e) {}
 
 // ✅ Good
-try { await fetchUser() } catch (e) { logger.error(e); throw e; }
+try { await fetchUser() } catch (e) { throw new Error('fetchUser failed', { cause: e }); }
 \`\`\``);
   }
 

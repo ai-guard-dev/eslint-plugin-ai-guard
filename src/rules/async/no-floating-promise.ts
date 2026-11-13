@@ -1,5 +1,5 @@
 import { ESLintUtils, AST_NODE_TYPES } from '@typescript-eslint/utils';
-import type { TSESTree } from '@typescript-eslint/utils';
+import type { TSESLint, TSESTree } from '@typescript-eslint/utils';
 
 const createRule = ESLintUtils.RuleCreator(
   (name) => `https://github.com/ai-guard-dev/eslint-plugin-ai-guard/blob/main/docs/rules/${name}.md`
@@ -334,17 +334,33 @@ export const noFloatingPromise = createRule({
     type: 'problem',
     docs: {
       description:
-        'Disallow calling an async function or Promise-returning function without awaiting or handling the result. AI tools frequently generate floating promises where errors disappear silently. Includes a safe autofix that marks intentional fire-and-forget calls with void.',
+        'Disallow calling an async function or Promise-returning function without awaiting or handling the result. AI tools frequently generate floating promises where errors disappear silently. There is no automatic fix, because marking a call with void would hide the finding without handling the error; editor suggestions offer await (inside an async function) or void for an intentional fire-and-forget call.',
     },
-    fixable: 'code',
+    hasSuggestions: true,
     schema: [],
     messages: {
       floatingPromise:
         'This async call is not awaited, returned, or error-handled (.catch). AI tools frequently generate floating promises, causing errors to be silently lost. Add `await`, `.catch()`, or assign the result.',
+      addAwait: 'Await it.',
+      markVoid: 'Mark it as intentionally not awaited (void). Errors from it will still be lost.',
     },
   },
   defaultOptions: [],
   create(context) {
+    /** Suggestions for a floating call: await it where that is valid, or mark it with void. */
+    function suggestions(statement: TSESTree.ExpressionStatement): TSESLint.ReportSuggestionArray<'addAwait' | 'markVoid'> {
+      const text = context.sourceCode.getText(statement.expression);
+      const fn = context.sourceCode.getAncestors(statement).reverse().find((n) =>
+        n.type === AST_NODE_TYPES.FunctionDeclaration
+        || n.type === AST_NODE_TYPES.FunctionExpression
+        || n.type === AST_NODE_TYPES.ArrowFunctionExpression);
+      const inAsync = !!fn && 'async' in fn && fn.async;
+      return [
+        ...(inAsync ? [{ messageId: 'addAwait' as const, fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(statement.expression, `await ${text}`) }] : []),
+        { messageId: 'markVoid' as const, fix: (fixer: TSESLint.RuleFixer) => fixer.replaceText(statement.expression, `void ${text}`) },
+      ];
+    }
+
     return {
       // Check ExpressionStatements — standalone call expressions
       ExpressionStatement(node) {
@@ -353,15 +369,7 @@ export const noFloatingPromise = createRule({
           node.expression.callee.type === AST_NODE_TYPES.Identifier &&
           node.expression.callee.name === 'Promise'
         ) {
-          context.report({
-            node,
-            messageId: 'floatingPromise',
-            fix: (fixer) =>
-              fixer.replaceText(
-                node.expression,
-                `void ${context.sourceCode.getText(node.expression)}`
-              ),
-          });
+          context.report({ node, messageId: 'floatingPromise', suggest: suggestions(node) });
           return;
         }
 
@@ -389,15 +397,7 @@ export const noFloatingPromise = createRule({
           isKnownPromiseFactoryCall(callExpr) ||
           isPromiseLikeByTypeInfo(callExpr, context)
         ) {
-          context.report({
-            node,
-            messageId: 'floatingPromise',
-            fix: (fixer) =>
-              fixer.replaceText(
-                node.expression,
-                `void ${context.sourceCode.getText(node.expression)}`
-              ),
-          });
+          context.report({ node, messageId: 'floatingPromise', suggest: suggestions(node) });
         }
       },
     };

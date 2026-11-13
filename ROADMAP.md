@@ -4,7 +4,7 @@ This document outlines the planned evolution of `eslint-plugin-ai-guard`.
 
 ---
 
-## ✅ Done (v1.0–v1.1)
+## ✅ Done (v1.0–v1.4)
 
 - **18 production rules** across 4 categories: Security, Reliability, Async Stability, AI Patterns
 - **Zero-config CLI** (`npx ai-guard run`) — no ESLint setup required
@@ -12,20 +12,24 @@ This document outlines the planned evolution of `eslint-plugin-ai-guard`.
 - **HTML report** (`ai-guard report`) with score, category breakdown, and top-rule charts
 - **Baseline mode** (`ai-guard baseline`) for tracking only new regressions
 - **AI agent context files** (`ai-guard init-context`) for Claude Code, Cursor, Copilot
-- **Autofixes** for `no-hardcoded-secret`, `no-empty-catch`, `no-floating-promise`, `no-await-in-loop`, `no-async-without-await`
+- **Autofixes** for `no-hardcoded-secret`, `no-await-in-loop`, `no-async-without-await` (`no-empty-catch` and `no-floating-promise` deliberately offer editor suggestions only, so `--fix` cannot hide them)
 - **Intent-aware heuristics** — `no-await-in-loop` respects retry/fallback/sequential patterns
 - **Self-scan CI** — the plugin scans its own source code in every CI run
-- **Shared test helper** — all 436+ tests use `tests/helpers/rule-tester.ts`
+- **Shared test helper** — rule tests use `tests/helpers/rule-tester.ts`
 - **SARIF 2.1.0 output** (`--sarif`) for GitHub Code Scanning, GitHub Action, MCP server (v1.2–v1.4)
 - **Baseline-aware PR scans** — `ai-guard changed --baseline` and the Action `baseline` input report only findings not in the committed baseline (1.4.3)
 - **Check integrity** — `ai-guard integrity`, `changed --integrity`, the Action `integrity` input, the Claude Code Stop hook and the MCP `ai_guard_check_integrity` tool detect changes that weaken checks (suppressions, skipped/removed tests, config downgrades, removed CI steps) (1.4.3)
 - **Claude Code hook protocol** — findings reach Claude via documented JSON output; inline directives never hide AI Guard findings silently (1.4.3)
+- **Agent safety** — `ai-guard verify`, `scan-agent-config`, test-integrity checks and nine new rules (27 total), the `agent` preset (1.4.4)
+- **Supply chain** — `ai-guard verify-deps`, the opt-in pre-install hook and the `ai_guard_check_package` MCP tool: invented names, typosquats, npm security placeholders, install scripts (1.4.5)
+- **Every agent, every commit** — hooks for Cursor and Codex (`init-hooks`), the pre-commit gate (`init-git-hook`), Oxlint support with CI parity, the official MCP Registry listing (1.4.5)
+- **Fresh-release check** — versions published in the last day, aware of npm/pnpm/Yarn/Bun release cooldowns (1.4.6)
 
 ---
 
 ## 🚧 In Progress / Near Term
 
-### v1.2 — False Positive Hardening
+### False positive hardening (ongoing)
 
 > **Goal:** Reduce false positives across all rules by auditing real-world codebases.
 
@@ -36,7 +40,7 @@ This document outlines the planned evolution of `eslint-plugin-ai-guard`.
 - [ ] Per-rule `options` schemas for all configurable rules
 - [ ] Validate against 3 popular open-source Express/Fastify projects
 
-### v1.3 — New Rules
+### Rule candidates
 
 Carefully selected, high-precision candidates:
 

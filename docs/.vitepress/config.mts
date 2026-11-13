@@ -15,6 +15,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/index' },
           { text: 'Getting Started', link: '/getting-started' },
+          { text: 'Results on real projects', link: '/evidence' },
           { text: 'Full Setup Guide', link: '/guides/getting-started' },
           { text: 'Migrating Existing Project', link: '/guides/migrating-existing-project' },
           { text: 'CI Integration', link: '/guides/ci-integration' },

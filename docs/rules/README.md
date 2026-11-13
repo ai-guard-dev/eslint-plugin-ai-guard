@@ -8,7 +8,7 @@ All 27 rules provided by `eslint-plugin-ai-guard`, organized by category.
 
 | Rule | Recommended | Strict | Description |
 |---|---|---|---|
-| [no-empty-catch](no-empty-catch.md) | `error` | `error` | Empty catch blocks silently discard errors (safe autofix available) |
+| [no-empty-catch](no-empty-catch.md) | `error` | `error` | Empty catch blocks silently discard errors; a TODO-only comment is not an explanation (no automatic fix, by design) |
 | [no-broad-exception](no-broad-exception.md) | `warn` | `error` | `catch (e: any)` loses all type information |
 | [no-catch-log-rethrow](no-catch-log-rethrow.md) | `off` | `error` | Log-then-rethrow adds noise, no recovery |
 | [no-catch-without-use](no-catch-without-use.md) | `off` | `error` | Catch parameter declared but never used |
@@ -18,7 +18,7 @@ All 27 rules provided by `eslint-plugin-ai-guard`, organized by category.
 
 | Rule | Recommended | Strict | Description |
 |---|---|---|---|
-| [no-floating-promise](no-floating-promise.md) | `error` | `error` | Async call without `await` or `.catch()` (safe autofix adds `void`) |
+| [no-floating-promise](no-floating-promise.md) | `error` | `error` | Async call without `await` or `.catch()` (no automatic fix, by design; editor suggestions) |
 | [no-async-array-callback](no-async-array-callback.md) | `warn` | `error` | `array.map(async ...)` returns `Promise[]`, not values |
 | [no-await-in-loop](no-await-in-loop.md) | `warn` | `error` | Independent sequential `await` in loops — intent-aware with safe autofix for simple cases |
 | [no-async-without-await](no-async-without-await.md) | `warn` | `error` | `async` function that never uses `await` (safe autofix for simple bodies) |

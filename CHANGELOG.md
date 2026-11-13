@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- `no-empty-catch` and `no-floating-promise` no longer have automatic fixes. The fixes inserted `/* TODO: handle error */` or `void`, which made the finding disappear without handling the error, so `eslint --fix` or an agent calling `ai_guard_fix` could hide them. Editors offer suggestions instead: rethrow for an empty catch; `await` (inside an async function) or `void` for a floating promise.
+- `no-empty-catch`: a comment that starts with `TODO`, `FIXME` or `XXX` no longer counts as an explanation, so `catch (e) { /* TODO */ }` is reported (new message). Code that relied on the old autofix will see these findings again.
+- `ai-guard doctor`: a missing GitHub Actions workflow is a suggestion, not a failure; `doctor` exits 0 when the setup works.
+- `init-context`: the catch-block example throws an error with context (`{ cause: e }`) instead of logging and rethrowing.
+- Release workflow runs for version tags only, not for the floating `v1` tag.
+
+### Added
+- [Results on real projects](docs/evidence.md): the package-check measurements and how to reproduce them.
+
+### Fixed
+- Docs: preset rule counts in `docs/cli/run.md`, stale "not yet published" notes for the MCP server, test counts.
+
 ## [1.4.6] — 2026-11-12
 
 ### Added

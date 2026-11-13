@@ -104,44 +104,66 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
         }
       `,
     },
+    // 13. An explanation that mentions a TODO later in the text is still an explanation
+    {
+      code: `
+        try { cache.warm(); }
+        catch (e) { /* cache is optional; see TODO.md for the plan */ }
+      `,
+    },
+    // 14. A TODO next to a real explanation: the explanation counts
+    {
+      code: `
+        try { optionalCleanup(); }
+        catch (e) {
+          // Cleanup failures are harmless: the temp dir is removed on reboot.
+          // TODO: report them to metrics
+        }
+      `,
+    },
   ],
   invalid: [
-    // 1. Basic empty catch
+    // 1. Basic empty catch: no automatic fix; the suggestion rethrows
     {
       code: `
         try { doSomething(); }
         catch (e) {}
-      `,
-      output: `
-        try { doSomething(); }
-        catch (e) { /* TODO: handle error */ }
       `,
       errors: [
         {
           messageId: 'emptyCatch',
           suggestions: [
             {
-              messageId: 'addTodoHandler',
+              messageId: 'rethrow',
               output: `
         try { doSomething(); }
-        catch (e) { /* TODO: handle error */ }
+        catch (e) { throw e; }
       `,
             },
           ],
         },
       ],
     },
-    // 2. Empty catch with no parameter
+    // 2. Empty catch with no parameter: the suggestion adds a binding to rethrow
     {
       code: `
         try { doSomething(); }
         catch {}
       `,
-      output: `
+      errors: [
+        {
+          messageId: 'emptyCatch',
+          suggestions: [
+            {
+              messageId: 'rethrow',
+              output: `
         try { doSomething(); }
-        catch { /* TODO: handle error */ }
+        catch (error) { throw error; }
       `,
-      errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
+            },
+          ],
+        },
+      ],
     },
     // 3. Empty catch in async function
     {
@@ -149,12 +171,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
         async function foo() {
           try { await bar(); }
           catch (e) {}
-        }
-      `,
-      output: `
-        async function foo() {
-          try { await bar(); }
-          catch (e) { /* TODO: handle error */ }
         }
       `,
       errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
@@ -167,12 +183,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
           catch (e) {}
         };
       `,
-      output: `
-        const foo = () => {
-          try { bar(); }
-          catch (e) { /* TODO: handle error */ }
-        };
-      `,
       errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
     },
     // 5. Nested try with inner empty catch
@@ -181,13 +191,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
         try {
           try { a(); }
           catch (inner) {}
-        }
-        catch (outer) { log(outer); }
-      `,
-      output: `
-        try {
-          try { a(); }
-          catch (inner) { /* TODO: handle error */ }
         }
         catch (outer) { log(outer); }
       `,
@@ -202,13 +205,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
         }
         catch (outer) {}
       `,
-      output: `
-        try {
-          try { a(); }
-          catch (inner) { log(inner); }
-        }
-        catch (outer) { /* TODO: handle error */ }
-      `,
       errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
     },
     // 7. Empty catch in class method
@@ -221,14 +217,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
           }
         }
       `,
-      output: `
-        class Service {
-          run() {
-            try { this.execute(); }
-            catch (e) { /* TODO: handle error */ }
-          }
-        }
-      `,
       errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
     },
     // 8. Empty catch with finally
@@ -236,11 +224,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
       code: `
         try { doSomething(); }
         catch (e) {}
-        finally { cleanup(); }
-      `,
-      output: `
-        try { doSomething(); }
-        catch (e) { /* TODO: handle error */ }
         finally { cleanup(); }
       `,
       errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
@@ -253,12 +236,6 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
           catch (e) {}
         }
       `,
-      output: `
-        for (const item of items) {
-          try { process(item); }
-          catch (e) { /* TODO: handle error */ }
-        }
-      `,
       errors: [{ messageId: 'emptyCatch', suggestions: 1 }],
     },
     // 10. Multiple empty catches
@@ -267,14 +244,53 @@ ruleTester.run('no-empty-catch', noEmptyCatch, {
         try { a(); } catch (e1) {}
         try { b(); } catch (e2) {}
       `,
-      output: `
-        try { a(); } catch (e1) { /* TODO: handle error */ }
-        try { b(); } catch (e2) { /* TODO: handle error */ }
-      `,
       errors: [
         { messageId: 'emptyCatch', suggestions: 1 },
         { messageId: 'emptyCatch', suggestions: 1 },
       ],
+    },
+    // 11. The placeholder the old autofix inserted is not an explanation
+    {
+      code: `
+        try { doSomething(); }
+        catch (e) { /* TODO: handle error */ }
+      `,
+      errors: [
+        {
+          messageId: 'placeholderCatch',
+          suggestions: [
+            {
+              messageId: 'rethrow',
+              output: `
+        try { doSomething(); }
+        catch (e) { throw e; }
+      `,
+            },
+          ],
+        },
+      ],
+    },
+    // 12. FIXME and XXX line comments, any case
+    {
+      code: `
+        try { a(); } catch (e) {
+          // fixme: handle the timeout case
+        }
+        try { b(); } catch (e) { // XXX
+        }
+      `,
+      errors: [
+        { messageId: 'placeholderCatch', suggestions: 1 },
+        { messageId: 'placeholderCatch', suggestions: 1 },
+      ],
+    },
+    // 13. Destructured binding: still reported, but there is no single value to rethrow
+    {
+      code: `
+        try { doSomething(); }
+        catch ({ message }) {}
+      `,
+      errors: [{ messageId: 'emptyCatch', suggestions: [] }],
     },
   ],
 });

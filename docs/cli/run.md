@@ -140,6 +140,6 @@ When using `--json`, output is written to stdout:
 
 | Flag | Rules enabled | Severity |
 |---|---|---|
-| (none) | recommended (12 rules) | balanced |
+| (none) | recommended (22 rules: 6 at `error`, 16 at `warn`) | balanced |
 | `--strict` | all 27 rules | all `error` |
-| `--security` | 6 security rules | `error`/`warn` |
+| `--security` | 11 security rules (6 at `error`) | `error`/`warn` |

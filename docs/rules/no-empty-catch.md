@@ -58,21 +58,19 @@ try {
 }
 ```
 
-## Safe autofix
+## No automatic fix
 
-This rule supports a safe autofix. For a truly empty catch block, `--fix` inserts a placeholder comment:
+This rule has no automatic fix, on purpose. A fix that filled the block with a comment would make the finding disappear while the error is still swallowed, and an AI agent running `--fix` would do exactly that.
+
+For the same reason, a comment that starts with `TODO`, `FIXME` or `XXX` does not count as an explanation:
 
 ```typescript
-// Before
 try {
   await runTask();
-} catch (e) {}
-
-// After
-try {
-  await runTask();
-} catch (e) { /* TODO: handle error */ }
+} catch (e) { /* TODO: handle error */ } // still reported
 ```
+
+Editors offer one suggestion, applied by a person: rethrow the error (`catch (e) { throw e; }`; a `catch {}` without a binding becomes `catch (error) { throw error; }`).
 
 ## How to fix
 

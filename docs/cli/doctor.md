@@ -75,8 +75,8 @@ ai-guard doctor
 
 | Code | Meaning |
 |---|---|
-| `0` | All checks passed |
-| `1` | One or more checks failed |
+| `0` | All required checks passed. Recommendations, such as adding a GitHub Actions workflow, are shown with `!` and do not fail the run. |
+| `1` | One or more required checks failed |
 
 This makes `doctor` usable in CI to verify environment setup:
 

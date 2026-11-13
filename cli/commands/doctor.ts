@@ -15,6 +15,8 @@ interface CheckResult {
   fix?: string;
   /** Additional explanation shown below fix as gray */
   note?: string;
+  /** A recommendation, not a requirement: shown when unmet, never fails the run. */
+  optional?: boolean;
 }
 
 // ─── Programmatic config load probe ──────────────────────────────────────────
@@ -334,6 +336,7 @@ export function registerDoctorCommand(program: Command): void {
         checks.push({
           label: 'GitHub Actions workflow configured',
           pass: hasAiGuardWorkflow,
+          optional: true,
           detail: hasAiGuardWorkflow
             ? 'ai-guard workflow found in .github/workflows/'
             : 'No ai-guard workflow found — PR validation and Code Scanning are not enabled',
@@ -352,18 +355,19 @@ export function registerDoctorCommand(program: Command): void {
 
       let allPassed = true;
       for (const check of checks) {
-        const icon = check.pass ? chalk.green('✔') : chalk.red('✖');
+        const suggestion = !check.pass && check.optional === true;
+        const icon = check.pass ? chalk.green('✔') : suggestion ? chalk.yellow('!') : chalk.red('✖');
         const label = check.pass
           ? chalk.white(check.label)
-          : chalk.red.bold(check.label);
+          : suggestion ? chalk.yellow(check.label) : chalk.red.bold(check.label);
 
         log.print(`  ${icon}  ${label}`);
         log.print(`       ${chalk.gray(check.detail)}`);
 
         if (!check.pass) {
-          allPassed = false;
+          if (!suggestion) allPassed = false;
           if (check.fix) {
-            log.print(`       ${chalk.cyan('→ Fix:')} ${chalk.yellow(check.fix)}`);
+            log.print(`       ${chalk.cyan(suggestion ? '→ Suggestion:' : '→ Fix:')} ${chalk.yellow(check.fix)}`);
           }
           if (check.note) {
             log.print(`       ${chalk.gray(check.note)}`);

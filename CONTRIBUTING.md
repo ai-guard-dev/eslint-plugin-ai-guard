@@ -76,7 +76,7 @@ git clone https://github.com/ai-guard-dev/eslint-plugin-ai-guard.git
 cd eslint-plugin-ai-guard
 npm install
 
-# Run the test suite (667 tests)
+# Run the test suite
 npm run test
 
 # TypeScript strict check (must always pass)
@@ -185,7 +185,7 @@ npm run lint:self    # Zero ai-guard errors on our own source
 ### Running tests
 
 ```bash
-npm run test              # Run all 667 tests
+npm run test              # Run all tests
 npm run test:watch        # Watch mode for development
 ```
 

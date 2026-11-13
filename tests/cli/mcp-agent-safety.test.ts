@@ -141,30 +141,45 @@ describe('ai_guard_scan_agent_config', () => {
 });
 
 describe('ai_guard_fix', () => {
-  const SOURCE = 'export async function run() {\n  try {\n    await work();\n  } catch (e) {}\n  save();\n}\nasync function save() { await db.save(); }\n';
+  // The secret is fixed for real (moved to an environment variable); the empty catch has no automatic fix.
+  const SOURCE = "const apiKey = 'sk-live-4f9a8b7c6d5e4f3a2b1c';\nexport async function run() {\n  try {\n    await work(apiKey);\n  } catch (e) {}\n}\n";
 
   it('previews fixes as a diff and leaves the file alone by default', async () => {
     write('src/run.js', SOURCE);
     const result = await call('ai_guard_fix', { path: 'src/run.js' });
     expect(result).toMatchObject({ success: true, changed: true, applied: false, file: 'src/run.js' });
-    expect(result.fixedRules).toEqual(expect.arrayContaining(['ai-guard/no-floating-promise']));
-    expect(result.diff).toContain('+  void save();');
+    expect(result.fixedRules).toEqual(['ai-guard/no-hardcoded-secret']);
+    expect(result.diff).toContain('+const apiKey = process.env.API_KEY;');
     expect(fs.readFileSync(path.join(root, 'src/run.js'), 'utf8')).toBe(SOURCE);
   });
 
-  it('writes the fixes with apply=true and leaves the file clean on a rescan', async () => {
+  it('writes the fixes with apply=true; a second run has nothing left to fix', async () => {
     write('src/run.js', SOURCE);
     expect(await call('ai_guard_fix', { path: 'src/run.js', apply: true })).toMatchObject({ changed: true, applied: true });
-    expect(fs.readFileSync(path.join(root, 'src/run.js'), 'utf8')).toContain('void save();');
-    expect(await call('ai_guard_fix', { path: 'src/run.js', apply: true })).toMatchObject({ changed: false, applied: false, diff: '' });
+    expect(fs.readFileSync(path.join(root, 'src/run.js'), 'utf8')).toContain('const apiKey = process.env.API_KEY;');
+    const again = await call('ai_guard_fix', { path: 'src/run.js', apply: true });
+    expect(again).toMatchObject({ changed: false, applied: false, diff: '' });
+    expect(again.remaining.map((i: { ruleId: string }) => i.ruleId)).toEqual(['ai-guard/no-empty-catch']);
   });
 
   it('applies only the requested rules', async () => {
-    write('src/run.js', SOURCE);
-    const result = await call('ai_guard_fix', { path: 'src/run.js', rules: ['no-floating-promise'] });
-    expect(result.fixedRules).toEqual(['ai-guard/no-floating-promise']);
-    expect(result.diff).not.toMatch(/^[-+].*catch/m); // the catch line is only context
-    expect(result.remaining.map((i: { ruleId: string }) => i.ruleId)).toContain('ai-guard/no-empty-catch');
+    // Two fixable problems under strict: the secret and the await in a loop. Only the secret is asked for.
+    write('src/two.js', "const apiKey = 'sk-live-4f9a8b7c6d5e4f3a2b1c';\nexport async function load(items) {\n  for (const id of items) { await fetch('/u/' + id + apiKey); }\n}\n");
+    const result = await call('ai_guard_fix', { path: 'src/two.js', preset: 'strict', rules: ['no-hardcoded-secret'] });
+    expect(result.fixedRules).toEqual(['ai-guard/no-hardcoded-secret']);
+    expect(result.diff).toContain('+const apiKey = process.env.API_KEY;');
+    expect(result.diff).not.toContain('Promise.all');
+    expect(result.remaining.map((i: { ruleId: string }) => i.ruleId)).toContain('ai-guard/no-await-in-loop');
+  });
+
+  it('cannot hide an empty catch or a floating promise: neither has an automatic fix', async () => {
+    const source = 'export async function run() {\n  try {\n    await work();\n  } catch (e) {}\n  save();\n}\nasync function save() { await db.save(); }\n';
+    write('src/hide.js', source);
+    const result = await call('ai_guard_fix', { path: 'src/hide.js', apply: true });
+    expect(result).toMatchObject({ changed: false, applied: false, diff: '', fixedRules: [] });
+    expect(fs.readFileSync(path.join(root, 'src/hide.js'), 'utf8')).toBe(source);
+    const remaining = result.remaining.map((i: { ruleId: string; fixable: boolean }) => [i.ruleId, i.fixable]);
+    expect(remaining).toEqual(expect.arrayContaining([['ai-guard/no-empty-catch', false], ['ai-guard/no-floating-promise', false]]));
   });
 
   it('reports findings that have no autofix as remaining', async () => {

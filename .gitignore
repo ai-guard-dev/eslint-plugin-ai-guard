@@ -38,6 +38,7 @@ ai-guard-results.sarif
 how --stat*
 
 # Agent working files and media
+skills-lock.json
 .agents/
 
 # Launch video assets and generated brag output (local only)
