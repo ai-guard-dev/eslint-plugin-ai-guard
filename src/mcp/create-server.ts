@@ -230,7 +230,7 @@ const readOnly = { readOnlyHint: true, openWorldHint: false };
 
 export function createMcpServer(root: string): McpServer {
   const workspace = canonicalWorkspace(root);
-  const server = new McpServer({ name: 'ai-guard', version: '1.4.6' }, {
+  const server = new McpServer({ name: 'ai-guard', version: '1.4.7' }, {
     instructions: 'Before calling work done, run verify_change: pass=true means no blocking issues; tell the user about every item in disclosures. Scan edits, fix findings, then rescan. Only status=complete with clean=true is a clean scan. Use scan_file for one file, scan_diff for Git changes, scan_project for a bounded directory, check_integrity to find checks your change weakened (new suppressions, skipped or removed tests, downgraded configs, removed CI steps), scan_agent_config for CLAUDE.md/AGENTS.md/MCP config, check_package before adding an npm dependency or running npx with a new package, fix for deterministic autofixes (a diff unless apply=true), and rules to inspect presets or look up a rule. Inline eslint-disable comments never hide findings here.',
   });
   const preset = z.enum(['recommended', 'strict', 'security', 'agent']);

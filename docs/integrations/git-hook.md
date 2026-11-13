@@ -33,7 +33,7 @@ Pick one with `--manager husky|lefthook|simple-git-hooks|pre-commit|git`.
 ```yaml
 repos:
   - repo: https://github.com/ai-guard-dev/eslint-plugin-ai-guard
-    rev: v1.4.6
+    rev: v1.4.7
     hooks:
       - id: ai-guard-verify
       - id: ai-guard-verify-deps   # optional, uses the npm registry

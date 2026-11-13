@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.4.7] — 2026-11-13
 
 ### Changed
 - `no-empty-catch` and `no-floating-promise` no longer have automatic fixes. The fixes inserted `/* TODO: handle error */` or `void`, which made the finding disappear without handling the error, so `eslint --fix` or an agent calling `ai_guard_fix` could hide them. Editors offer suggestions instead: rethrow for an empty catch; `await` (inside an async function) or `void` for a floating promise.
