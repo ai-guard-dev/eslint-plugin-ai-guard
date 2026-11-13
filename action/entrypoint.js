@@ -65,8 +65,10 @@ function detectPackageManager(cwd) {
 }
 
 function installDependencies(cwd, pm) {
+  // npm ci needs a lockfile; without one it prints a long error before the fallback runs.
+  const npmLock = fs.existsSync(path.join(cwd, 'package-lock.json')) || fs.existsSync(path.join(cwd, 'npm-shrinkwrap.json'));
   const cmds = {
-    npm:  'npm ci --prefer-offline 2>&1 || npm install --prefer-offline 2>&1',
+    npm:  npmLock ? 'npm ci --prefer-offline 2>&1 || npm install --prefer-offline 2>&1' : 'npm install --prefer-offline 2>&1',
     pnpm: 'pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1',
     yarn: 'yarn install --frozen-lockfile 2>&1 || yarn install 2>&1',
   };
@@ -249,6 +251,11 @@ async function main() {
     // Set SARIF output path for upload-sarif action
     setOutput('sarif-file', sarifOutputPath);
     info(`SARIF written to: ${sarifOutputPath}`);
+    if (uploadSarif) {
+      info('To see these findings in Security → Code scanning, add a step after this one: '
+        + 'uses: github/codeql-action/upload-sarif@v3, if: always(), '
+        + 'with sarif_file: ${{ steps.<this step id>.outputs.sarif-file }} and category: ai-guard.');
+    }
   } else if (uploadSarif) {
     warn(`SARIF file not found at ${sarifOutputPath}. Creating fallback SARIF artifact.`);
     try {
@@ -263,7 +270,9 @@ async function main() {
       };
       fs.writeFileSync(sarifOutputPath, JSON.stringify(emptySarif, null, 2), 'utf-8');
       setOutput('sarif-file', sarifOutputPath);
-    } catch {}
+    } catch (err) {
+      warn(`Could not write the fallback SARIF file (${err instanceof Error ? err.message : String(err)}); an upload-sarif step will find no file.`);
+    }
   }
 
   setOutput('issues-found', String(issuesFound));

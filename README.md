@@ -455,13 +455,24 @@ jobs:
           cache: 'npm'
 
       - name: Run AI Guard
+        id: aiguard
         uses: ai-guard-dev/eslint-plugin-ai-guard@v1
         with:
           preset: 'recommended'
           fail-on: 'high'
           changed-only: 'true'
-          upload-sarif: 'true'
+
+      # The Action writes SARIF; this step sends it to Code Scanning.
+      # if: always() uploads it even when the scan step fails the job.
+      - name: Upload to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.aiguard.outputs.sarif-file }}
+          category: ai-guard
 ```
+
+The Action annotates the pull request and writes the job summary by itself. Alerts in **Security → Code scanning** need the upload step.
 
 ### Action Inputs (`action.yml`)
 
@@ -471,7 +482,7 @@ jobs:
 | `fail-on` | Severity threshold to fail CI: `high` \| `medium` \| `any` \| `none` | `'high'` |
 | `changed-only` | Scan only files changed in this PR / commit | `'true'` |
 | `path` | Target file or directory to scan | `'.'` |
-| `upload-sarif` | Upload results to GitHub Code Scanning | `'true'` |
+| `upload-sarif` | Always write the SARIF file (`sarif-file` output) for an `upload-sarif` step, even when the scan produced none. The Action does not upload to Code Scanning by itself | `'true'` |
 | `github-summary` | Write an execution breakdown to the GitHub Actions Job Summary | `'true'` |
 | `working-directory`| Working directory for scanning (ideal for monorepos) | `'.'` |
 | `package-manager` | Package manager: `auto` \| `npm` \| `pnpm` \| `yarn` | `'auto'` |

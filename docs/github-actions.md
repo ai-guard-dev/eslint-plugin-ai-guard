@@ -217,6 +217,8 @@ Set `test-integrity: 'true'` to flag tests the PR deleted, skipped, focused or w
 
 ai-guard generates SARIF 2.1.0 output that integrates directly with GitHub Advanced Security.
 
+**With the Action, add the upload step yourself.** `ai-guard-dev/eslint-plugin-ai-guard@v1` annotates the pull request and writes the job summary, and it writes the SARIF file (output `sarif-file`), but it does not upload to Code Scanning. Give the Action step an `id` and add `github/codeql-action/upload-sarif@v3` after it with `if: always()` (the scan step fails the job when it finds high-confidence issues), `sarif_file` set to that step's `sarif-file` output, and `category: ai-guard`. The README has the full workflow.
+
 ### Why findings persist across runs
 
 ai-guard emits three stable identity anchors in every SARIF upload:
